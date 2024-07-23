@@ -10,7 +10,7 @@ public class AIResponseController : MonoBehaviour
     public TMP_Text ResponseText;
 
     private string apiUrl = "https://api.openai.com/v1/chat/completions";
-    private string apiKey = "sk-proj-wmce0Zq66Kj8ASlroNvUT3BlbkFJK64OwzjLErR7idpAVpJ5";
+    private string apiKey = null;
 
     [System.Serializable]
     public class Message
