@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
+//using System.Text.Json;
+//using System.Text.Json.Serialization;
+using Newtonsoft.Json;
 
 public class AIResponseController : MonoBehaviour
 {
@@ -10,56 +13,70 @@ public class AIResponseController : MonoBehaviour
     public TMP_Text ResponseText;
 
     private string apiUrl = "https://api.openai.com/v1/chat/completions";
-    private string apiKey = null;
+    private string apiKey;
+
+    private void Start()
+    {
+        apiKey = System.Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            Debug.LogError("API key is not found in the list of environment variables");
+        }
+    }
 
     [System.Serializable]
     public class Message
     {
-        public string Role;
-        public string Content;
+        public string role { get; set; }
+        public string content { get; set; }
     }
 
     [System.Serializable]
     public class GPTRequest
     {
-        public string Model;
-        public List<Message> Messages;
-        public float Temperature;
+        public string model { get; set; }
+        public List<Message> messages { get; set; }
+        public float temperature { get; set; }
     }
 
     [System.Serializable]
     public class Usage
     {
-        public int PromptTokens;
-        public int CompletionTokens;
-        public int TotalTokens;
+        public int promptTokens { get; set; }
+        public int completionTokens { get; set; }
+        public int totalTokens { get; set; }
     }
 
     [System.Serializable]
     public class Choice
     {
-        public Message Message;
-        public object LogProbs;
-        public string FinishReason;
-        public int Index = 0;
+        public Message message { get; set; }
+        public object logProbs { get; set; }
+        public string finishReason { get; set; }
+        public int index { get; set; }
     }
 
 
     [System.Serializable]
     public class GPTResponse
     {
-        public int Id;
-        public string @Object;
-        public long Created;
-        public string Model;
-        public Usage @Usage;
-        public List<Choice> Choices;
+        public string id { get; set; }
+        public string @object { get; set; }
+        public long created { get; set; }
+        public string model { get; set; }
+        public Usage usage { get; set; }
+        public List<Choice> choices { get; set; }
+        public string systemFingerprint { get; set; }
     }
 
     public void OnSubmit()
     {
+        //Debug.Log("OnSubmit()");
         string promptText = PromptField.text;
-        StartCoroutine(SendRequest(promptText));
+        //Debug.Log("OnSubmit() Prompt Text: " + promptText);
+        //StartCoroutine(SendRequest(promptText));
+        StartCoroutine(SendRequest("Say this is a test!"));
     }
 
     private IEnumerator SendRequest(string userPrompt)
@@ -67,12 +84,13 @@ public class AIResponseController : MonoBehaviour
         // Instantiating and initializing the GPT request
         GPTRequest gptRequest = new GPTRequest
         {
-            Model = "gpt-4o-mini",
-            Messages = new List<Message> { new Message { Role = "user", Content = userPrompt } },
-            Temperature = 0.7f
+            model = "gpt-4o-mini",
+            messages = new List<Message> { new Message { role = "user", content = userPrompt } },
+            temperature = 0.7f
         };
 
-        string jsonData = JsonUtility.ToJson(gptRequest);
+        //string jsonData = JsonUtility.ToJson(gptRequest);
+        string jsonData = JsonConvert.SerializeObject(gptRequest);
 
         UnityWebRequest request = new UnityWebRequest(apiUrl, "POST");
         byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonData);
@@ -91,8 +109,12 @@ public class AIResponseController : MonoBehaviour
         }
         else
         {
-            GPTResponse gptResponse = JsonUtility.FromJson<GPTResponse>(request.downloadHandler.text);
-            ResponseText.text = gptResponse.Choices[0].Message.Content.Trim();
+            //GPTResponse gptResponse = JsonUtility.FromJson<GPTResponse>(request.downloadHandler.text);
+            GPTResponse gptResponse = JsonConvert.DeserializeObject<GPTResponse>(request.downloadHandler.text);
+
+            Debug.Log(request.downloadHandler.text);
+            Debug.Log(gptResponse.choices[0].message.content.ToString());
+            ResponseText.text = gptResponse.choices[0].message.content.Trim();   
         }
 
     }
