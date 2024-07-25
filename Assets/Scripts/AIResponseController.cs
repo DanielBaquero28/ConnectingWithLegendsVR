@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
-//using System.Text.Json;
-//using System.Text.Json.Serialization;
 using Newtonsoft.Json;
 
 public class AIResponseController : MonoBehaviour
@@ -72,11 +70,8 @@ public class AIResponseController : MonoBehaviour
 
     public void OnSubmit()
     {
-        //Debug.Log("OnSubmit()");
-        string promptText = PromptField.text;
-        //Debug.Log("OnSubmit() Prompt Text: " + promptText);
-        //StartCoroutine(SendRequest(promptText));
-        StartCoroutine(SendRequest("Say this is a test!"));
+        string promptText = PromptField.text;        
+        StartCoroutine(SendRequest(promptText)); 
     }
 
     private IEnumerator SendRequest(string userPrompt)
