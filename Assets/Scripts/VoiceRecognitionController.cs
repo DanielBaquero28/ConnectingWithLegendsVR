@@ -5,8 +5,9 @@ using UnityEngine;
 
 public class VoiceRecognitionController : MonoBehaviour
 {
-    //public TMP_Text InputField;
+    public TMP_InputField OutputField;
     private AudioRecorder audioRecorder;
+    private SpeechToText speechToText;
 
     public TMP_Text CountdownText;
     public float countdown;
@@ -15,6 +16,7 @@ public class VoiceRecognitionController : MonoBehaviour
     private void Start()
     {
         audioRecorder = gameObject.AddComponent<AudioRecorder>();
+        speechToText = gameObject.AddComponent<SpeechToText>();
     }
 
     public void StartRecording()
@@ -46,5 +48,7 @@ public class VoiceRecognitionController : MonoBehaviour
         yield return new WaitForSeconds(10);
 
         string audioPath = audioRecorder.SaveWavFile(audioClip, Application.persistentDataPath + "/audio_prompt.wav");
+        Debug.Log(audioPath);
+        yield return StartCoroutine(speechToText.Recognize(audioPath, OutputField));
     }
 }
