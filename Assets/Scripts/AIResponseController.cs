@@ -80,7 +80,7 @@ public class AIResponseController : MonoBehaviour
         GPTRequest gptRequest = new GPTRequest
         {
             model = "gpt-4o-mini",
-            messages = new List<Message> { new Message { role = "user", content = userPrompt } },
+            messages = new List<Message> { new Message { role = "user", content = "Respond in 1 sentence, no more than 100 characters. " + userPrompt } },
             temperature = 0.7f
         };
 
@@ -107,8 +107,8 @@ public class AIResponseController : MonoBehaviour
             //GPTResponse gptResponse = JsonUtility.FromJson<GPTResponse>(request.downloadHandler.text);
             GPTResponse gptResponse = JsonConvert.DeserializeObject<GPTResponse>(request.downloadHandler.text);
 
-            Debug.Log(request.downloadHandler.text);
-            Debug.Log(gptResponse.choices[0].message.content.ToString());
+            //Debug.Log(request.downloadHandler.text);
+            //Debug.Log(gptResponse.choices[0].message.content.ToString());
             ResponseText.text = gptResponse.choices[0].message.content.Trim();   
         }
 
