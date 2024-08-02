@@ -4,6 +4,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
 using Newtonsoft.Json;
+using System.Threading.Tasks;
 
 public class AIResponseController : MonoBehaviour
 {
@@ -12,6 +13,8 @@ public class AIResponseController : MonoBehaviour
 
     private string apiUrl = "https://api.openai.com/v1/chat/completions";
     private string apiKey;
+
+    public TextToSpeech textToSpeech;
 
     private void Start()
     {
@@ -109,9 +112,17 @@ public class AIResponseController : MonoBehaviour
 
             //Debug.Log(request.downloadHandler.text);
             //Debug.Log(gptResponse.choices[0].message.content.ToString());
-            ResponseText.text = gptResponse.choices[0].message.content.Trim();   
+            ResponseText.text = gptResponse.choices[0].message.content.Trim();
+
+            StartCoroutine(CallSynthesizeSpeech(gptResponse.choices[0].message.content.Trim()));
+            
         }
 
+    }
+
+    private IEnumerator CallSynthesizeSpeech(string text)
+    {
+        yield return textToSpeech.SynthesizeSpeech(text);
     }
    
 }

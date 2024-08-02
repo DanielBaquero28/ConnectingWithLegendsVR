@@ -21,16 +21,16 @@ public class SpeechToText : MonoBehaviour
         {
             Encoding = RecognitionConfig.Types.AudioEncoding.Linear16,
             SampleRateHertz = 44100,
-            LanguageCode = LanguageCodes.Spanish.Colombia,
+            LanguageCode = LanguageCodes.English.UnitedStates,
         }, RecognitionAudio.FromFile(audioPath));
 
-        //Debug.Log(response);
+        Debug.Log(response);
 
         foreach (var result in response.Results)
         {
             foreach (var alternative in result.Alternatives)
             {
-                outputField.text += " " + alternative.Transcript;
+                outputField.text += alternative.Transcript;
             }
         }
         yield return null;

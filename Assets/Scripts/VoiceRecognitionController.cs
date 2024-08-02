@@ -21,7 +21,7 @@ public class VoiceRecognitionController : MonoBehaviour
 
     public void StartRecording()
     {
-        //Debug.Log("Started recording!");
+        Debug.Log("Started recording!");
         recording = true;
         countdown = 15f;
         AudioClip audioClip = audioRecorder.RecordAudio();
