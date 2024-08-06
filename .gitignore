@@ -73,3 +73,6 @@ crashlytics-build.properties
 
 # Additional files
 windy-collector-google.json
+
+# Imported assets
+/[Aa]ssets/University Lecture Theatre/*

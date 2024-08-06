@@ -5,11 +5,13 @@ using UnityEngine;
 using UnityEngine.Networking;
 using Newtonsoft.Json;
 using System.Threading.Tasks;
+using Google.Protobuf.WellKnownTypes;
 
 public class AIResponseController : MonoBehaviour
 {
     public TMP_InputField PromptField;
     public TMP_Text ResponseText;
+    public TMP_Dropdown InfluentialPersonDropdown;
 
     private string apiUrl = "https://api.openai.com/v1/chat/completions";
     private string apiKey;
@@ -79,11 +81,22 @@ public class AIResponseController : MonoBehaviour
 
     private IEnumerator SendRequest(string userPrompt)
     {
+        Debug.Log(InfluentialPersonDropdown.value.ToString());
+        string influentialPerson = InfluentialPersonDropdown.value switch
+        {
+            0 => "Albert Einstein",
+            1 => "Alexander the Great",
+            2 => "Leonardo da Vinci",
+            _ => null
+        };
+
+        Debug.Log(influentialPerson);
+
         // Instantiating and initializing the GPT request
         GPTRequest gptRequest = new GPTRequest
         {
             model = "gpt-4o-mini",
-            messages = new List<Message> { new Message { role = "user", content = "Respond in 1 sentence, no more than 100 characters. " + userPrompt } },
+            messages = new List<Message> { new Message { role = "user", content = "Respond in 1 sentence, no more than 100 characters. " + $"You are {influentialPerson}. " + userPrompt } },
             temperature = 0.7f
         };
 
