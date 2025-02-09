@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 public class VoiceRecognitionController : MonoBehaviour
 {
@@ -10,8 +11,11 @@ public class VoiceRecognitionController : MonoBehaviour
     private SpeechToText speechToText;
 
     public TMP_Text CountdownText;
-    private float countdown = 15f;
+    private float countdown = 10f;
     private bool recording = false;
+
+    [SerializeField]
+    public Button RecordButton;
 
     private void Start()
     {
@@ -23,7 +27,7 @@ public class VoiceRecognitionController : MonoBehaviour
     {
         Debug.Log("Started recording!");
         recording = true;
-        countdown = 15f;
+        countdown = 10f;
         AudioClip audioClip = audioRecorder.RecordAudio();
         StartCoroutine(ProcessRecording(audioClip));
     }
@@ -40,6 +44,7 @@ public class VoiceRecognitionController : MonoBehaviour
             recording = false;
             CountdownText.text = "0";
             CountdownText.gameObject.SetActive(false);
+            RecordButton.interactable = true;
         }
 
     }
