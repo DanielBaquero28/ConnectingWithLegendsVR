@@ -14,8 +14,16 @@ public class VoiceRecognitionController : MonoBehaviour
     private float countdown = 10f;
     private bool recording = false;
 
+    [Header("Buttons Information")]
+
     [SerializeField]
     public Button RecordButton;
+
+    [SerializeField]
+    public Button SubmitButton;
+
+    [SerializeField]
+    public Button NewQuestionButton;
 
     private void Start()
     {
@@ -45,6 +53,8 @@ public class VoiceRecognitionController : MonoBehaviour
             CountdownText.text = "0";
             CountdownText.gameObject.SetActive(false);
             RecordButton.interactable = true;
+            SubmitButton.interactable = true;
+            NewQuestionButton.interactable = true;
         }
 
     }

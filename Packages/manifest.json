@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "com.meta.xr.sdk.all": "72.0.0",
     "com.oshoham.unity-google-cloud-streaming-speech-to-text": "0.1.8",
     "com.unity.collab-proxy": "2.4.3",
     "com.unity.ide.rider": "3.0.28",
