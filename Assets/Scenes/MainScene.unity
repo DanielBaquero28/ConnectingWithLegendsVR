@@ -1777,6 +1777,18 @@ MonoBehaviour:
           m_StringArgument: 
           m_BoolArgument: 1
         m_CallState: 2
+      - m_Target: {fileID: 997108555}
+        m_TargetAssemblyTypeName: UnityEngine.GameObject, UnityEngine
+        m_MethodName: SetActive
+        m_Mode: 6
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 0
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 1
+        m_CallState: 2
 --- !u!114 &290445362
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3413,7 +3425,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
-  m_AnchoredPosition: {x: 0, y: 5.44}
+  m_AnchoredPosition: {x: 0, y: 5.29}
   m_SizeDelta: {x: 1135, y: 745}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!1 &556506517
@@ -4755,16 +4767,10 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 'Finally, you''ll have the opportunity to talk with the most influential
-    figures throughout history. Are you excited? I hope you are :)
-
-
-    Follow the
-    following  steps to make history come alive...
-
-
-    For now, just face the black
-    wall or the main board. There will be more instructions to follow.'
+  m_text: "Get ready to meet some of the most influential figures in history! Exciting,
+    right? I hope so! \U0001F60A\n\nFollow these steps to bring history to life\u2026\n\nFor
+    now, simply turn toward the black wall or the main board. More instructions will
+    follow soon!"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
@@ -5476,7 +5482,7 @@ PrefabInstance:
     - target: {fileID: 919132149155446097, guid: f979b12a40455974d8dcb43e1257c0db,
         type: 3}
       propertyPath: m_IsActive
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: f979b12a40455974d8dcb43e1257c0db,
         type: 3}
@@ -6143,8 +6149,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 80, y: -129}
-  m_SizeDelta: {x: 130, y: 30}
+  m_AnchoredPosition: {x: -70, y: -129.1}
+  m_SizeDelta: {x: 140, y: 30}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1134732641
 MonoBehaviour:
@@ -6856,6 +6862,53 @@ MonoBehaviour:
   m_LightCookieSize: {x: 1, y: 1}
   m_LightCookieOffset: {x: 0, y: 0}
   m_SoftShadowQuality: 0
+--- !u!1 &1260621067
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1260621068}
+  - component: {fileID: 1260621069}
+  m_Layer: 0
+  m_Name: PromptEnablerController
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1260621068
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1260621067}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1260621069
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1260621067}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7fcb6aacf7f9d004ea6cf43df58d4b10, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  OVRCamera: {fileID: 1524149158}
+  MainBoardTitleCanvas: {fileID: 553414999}
+  EnablerButton: {fileID: 290445361}
 --- !u!1 &1282095877
 GameObject:
   m_ObjectHideFlags: 0
@@ -7264,8 +7317,8 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 18
-  m_fontSizeBase: 18
+  m_fontSize: 21
+  m_fontSizeBase: 21
   m_fontWeight: 400
   m_enableAutoSizing: 0
   m_fontSizeMin: 18
@@ -7815,11 +7868,16 @@ PrefabInstance:
     - target: {fileID: 2483171112402263010, guid: f54012181eacade4ea242c65f804720f,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: -0.15
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 2483171112407822886, guid: f54012181eacade4ea242c65f804720f,
         type: 3}
       propertyPath: _trackingOriginType
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2483171112407822886, guid: f54012181eacade4ea242c65f804720f,
+        type: 3}
+      propertyPath: usePositionTracking
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2483171112407822886, guid: f54012181eacade4ea242c65f804720f,
@@ -7855,7 +7913,7 @@ PrefabInstance:
     - target: {fileID: 2514675399181695721, guid: f54012181eacade4ea242c65f804720f,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.874
+      value: 0.7
       objectReference: {fileID: 0}
     - target: {fileID: 2514675399181695721, guid: f54012181eacade4ea242c65f804720f,
         type: 3}
@@ -8332,24 +8390,14 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 'Follow these steps:
-
-    1. Select from the dropdown the influential figure
-    you''d like to talk to.
-
-    2. Make the question you''d like to ask. There''s
-    2 ways you could do it: a) You could write it clicking on the "What''s your question?"
-    section; a virtual keyboard will show up. b) You could record yourself asking
-    the question clicking on the "Record" button. You will have 10 seconds to ask
-    the question, DON''T press on another button until the time is up.
-
-    3. Once
-    your question is correct, hit the "Submit" button, to actually ask the question.
-
-    4.
-    The response will appear underneath.
-
-    5. Repeat! Enjoy!'
+  m_text: "Follow these steps:\n\n1. Select the influential figure you\u2019d like
+    to talk to from the dropdown menu.\n2. Ask your question in one of two ways:\n   
+    a.) Type it: Click on the \"What's your question?\" section to bring up a virtual
+    keyboard and enter your question.\n    b.) Record it: Click the \"Record\" button
+    and speak your question. You\u2019ll have 10 seconds\u2014do not press any other
+    buttons until the time is up.\n3. Once you're happy with your question, click
+    \"Submit\" to send it.\n4. The response will appear below.\n5. Repeat and enjoy
+    the conversation!"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
@@ -11292,7 +11340,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &2057820896
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -11905,7 +11953,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
-  m_AnchoredPosition: {x: 0, y: -0.066}
+  m_AnchoredPosition: {x: 0, y: -0.167}
   m_SizeDelta: {x: 1, y: 0.85}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &2122944412
@@ -12049,4 +12097,5 @@ SceneRoots:
   - {fileID: 1226779611}
   - {fileID: 1908680141}
   - {fileID: 296497472}
+  - {fileID: 1260621068}
   - {fileID: 471937121}
