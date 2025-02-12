@@ -66,7 +66,7 @@ This project isn’t just a prototype—it’s a demonstration of my ability to:
 - **Write clean, modular, and scalable code**
 - **Optimize performance for VR environments**
 
-📩 **I’m looking for my next opportunity!** If you’re hiring or know of a great VR/AI role, feel free to connect with me on [LinkedIn](https://www.linkedin.com/in/daniel-alejandro-baquero/) or reach out directly!
+📩 **I’m looking for my next opportunity!** If you’re hiring or know of a great VR role, feel free to connect with me on [LinkedIn](https://www.linkedin.com/in/daniel-alejandro-baquero/) or reach out directly!
 
 ---
 
