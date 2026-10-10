@@ -1,0 +1,3 @@
+node_modules/
+# Local env file holds real keys — never commit (use .env.example as the template).
+.env

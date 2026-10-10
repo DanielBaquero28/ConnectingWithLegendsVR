@@ -96,7 +96,7 @@ public class AIResponseController : MonoBehaviour
         GPTRequest gptRequest = new GPTRequest
         {
             model = "gpt-4o-mini",
-            messages = new List<Message> { new Message { role = "user", content = "Respond in 1 sentence, no more than 100 characters. " + $"You are {influentialPerson}. " + userPrompt } },
+            messages = new List<Message> { new Message { role = "user", content = "Respond in 1 sentence, no more than 100 characters. " + $"You are Albert Einstein. " + userPrompt } },
             temperature = 0.7f
         };
 
@@ -111,7 +111,14 @@ public class AIResponseController : MonoBehaviour
         request.SetRequestHeader("Content-Type", "application/json");
         request.SetRequestHeader("Authorization", "Bearer " + apiKey);
 
+        // For testing purposes
+        //ResponseText.text = "Hello, my name is Albert Einstein. I'm very happy to be talking to you today. What is it thta you want to know?";
+
         yield return request.SendWebRequest();
+
+        // For testing purposes
+        //yield return StartCoroutine(CallSynthesizeSpeech(ResponseText.text));
+        //yield break;
 
         if (request.result == UnityWebRequest.Result.ConnectionError || request.result == UnityWebRequest.Result.ProtocolError)
         {
@@ -128,8 +135,9 @@ public class AIResponseController : MonoBehaviour
             ResponseText.text = gptResponse.choices[0].message.content.Trim();
 
             StartCoroutine(CallSynthesizeSpeech(gptResponse.choices[0].message.content.Trim()));
-            
+
         }
+
 
     }
 

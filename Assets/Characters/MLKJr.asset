@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2ded755fe93f4f00b60298b26ea2c05d, type: 3}
+  m_Name: MLKJr
+  m_EditorClassIdentifier: 
+  characterId: mlk
+  displayName: Martin Luther King Jr.
+  era: 1929-1968
+  portrait: {fileID: 0}
+  cardTint: {r: 0.29411766, g: 0.18039216, b: 0.14117648, a: 1}
+  sceneName: MLKScene
+  available: 1

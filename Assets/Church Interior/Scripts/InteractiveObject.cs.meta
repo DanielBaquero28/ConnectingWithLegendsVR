@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: 7961621fe9c2a1b4a9c4daf35ee5c1a7
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 157136
+  packageName: Rural Church
+  packageVersion: 1.2
+  assetPath: Assets/Church Interior/Scripts/InteractiveObject.cs
+  uploadId: 617721

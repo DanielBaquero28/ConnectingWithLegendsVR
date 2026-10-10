@@ -19,6 +19,9 @@ public class PromptEnabler : MonoBehaviour
 
     private TMP_Text buttonText;
 
+    [SerializeField]
+    public TMP_Text clickHereText;
+
     private void Start()
     {
         buttonText = EnablerButton.GetComponentInChildren<TMP_Text>();
@@ -32,12 +35,14 @@ public class PromptEnabler : MonoBehaviour
             EnablerButton.interactable = true;
             EnablerButton.image.color = Color.green;
             buttonText.color = Color.black;
+            clickHereText.gameObject.SetActive(true);
         }
         else
         {
             EnablerButton.interactable = false;
             EnablerButton.image.color = Color.red;
             buttonText.color = Color.white;
+            clickHereText.gameObject.SetActive(false);
         }
     }
 
@@ -48,10 +53,10 @@ public class PromptEnabler : MonoBehaviour
         //Debug.Log($"Direction: {direction}");
 
         Vector3 cameraForward = OVRCamera.forward;
-        Debug.Log($"Camera Forward: {cameraForward}");
+        //Debug.Log($"Camera Forward: {cameraForward}");
 
         float dotProduct = Vector3.Dot(cameraForward, direction);
-        Debug.Log($"Dot Product: {dotProduct}");
+        //Debug.Log($"Dot Product: {dotProduct}");
 
         return dotProduct > activationThreshold;
 

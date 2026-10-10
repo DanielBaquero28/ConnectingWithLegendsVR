@@ -10,8 +10,8 @@ public class DisableButton : MonoBehaviour
     [SerializeField]
     private Button submitButton;
 
-    [SerializeField]
-    private Button newQuestionButton;
+    //[SerializeField]
+    //private Button newQuestionButton;
 
     // Start is called before the first frame update
     void Start()
@@ -25,6 +25,6 @@ public class DisableButton : MonoBehaviour
     {
         recordButton.interactable = false;
         submitButton.interactable = false;
-        newQuestionButton.interactable = false;
+        //newQuestionButton.interactable = false;
     }
 }

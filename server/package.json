@@ -1,0 +1,19 @@
+{
+  "name": "hsvr-proxy",
+  "version": "1.0.0",
+  "description": "History Speaks VR backend proxy: auth, /converse pipeline (STT->LLM->TTS), safety, metering, alerts. Spec 3.",
+  "private": true,
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "smoke": "node scripts/smoke.js"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^7.10.0",
+    "express": "^4.21.2",
+    "google-auth-library": "^9.15.1"
+  }
+}

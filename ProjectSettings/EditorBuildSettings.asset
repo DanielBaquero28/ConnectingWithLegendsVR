@@ -5,9 +5,24 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
-  - enabled: 0
-    path: Assets/Scenes/SampleScene.unity
-    guid: 99c9720ab356a0642a771bea13969a05
+  - enabled: 1
+    path: Assets/Scenes/HubScene.unity
+    guid: 1e7af27b418a13440a4e2d757eaa4222
+  - enabled: 1
+    path: Assets/Scenes/MainScene.unity
+    guid: 236ecda3b92854f41ba36bc69cdcf13a
+  - enabled: 1
+    path: Assets/Scenes/MLKScene.unity
+    guid: acaeec956d882ba49ad847ec70fb5fea
+  - enabled: 1
+    path: Assets/Scenes/CleopatraScene.unity
+    guid: 524531b781c36b54a848686ebf256d8f
+  - enabled: 1
+    path: Assets/Scenes/JuliusCaesarScene.unity
+    guid: 773bbed47f2d1554e8816c7690ebeed3
+  - enabled: 1
+    path: Assets/Scenes/AbrahamLincolnScene.unity
+    guid: b1ac6b32e03b5c24faa89464338bb5a2
   m_configObjects:
     com.unity.xr.management.loader_settings: {fileID: 11400000, guid: b7dcb9d020d2d8e41ac0d9a541594aa4,
       type: 2}

@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: f82765502898de442b5ef19776c5e2a8
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 157136
+  packageName: Rural Church
+  packageVersion: 1.2
+  assetPath: Assets/Church Interior/Scripts/ImageText.cs
+  uploadId: 617721
