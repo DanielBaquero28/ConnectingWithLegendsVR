@@ -36,7 +36,9 @@ async function getCharacter(characterId) {
       speakingRate: (raw.voice && raw.voice.speakingRate) || 1.0,
       pitch: raw.voice && typeof raw.voice.pitch === 'number' ? raw.voice.pitch : 0.0,
     },
-    modelName: raw.modelName || 'gemini-2.5-flash-lite',
+    // Spec 12: Claude model + adaptive-thinking effort (validated on PUT).
+    modelName: raw.modelName || 'claude-haiku-5-5',
+    effort: raw.effort || 'low',
     maxWords: raw.maxWords || 40,
     maxTurns: raw.maxTurns || 8,
   };

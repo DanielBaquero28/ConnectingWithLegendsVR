@@ -2,7 +2,7 @@
 // Accepts audio/wav (voice path) or application/json (typed path) and returns
 // { transcript, replyText, audioBase64 }.
 //
-// Providers are called through their module objects (gemini.generateReply,
+// Providers are called through their module objects (claude.generateReply,
 // not a destructured import) so the smoke test can mock them via the require
 // cache.
 
@@ -10,7 +10,7 @@ const express = require('express');
 const { deviceAuth } = require('./auth');
 const characters = require('./characters');
 const sessions = require('./sessions');
-const gemini = require('./providers/gemini');
+const claude = require('./providers/claude');
 const googleTts = require('./providers/googleTts');
 const deepgram = require('./providers/deepgram');
 const safety = require('./safety');
@@ -145,9 +145,9 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
     return res.status(403).json({ error: 'Session belongs to another device' });
   }
 
-  // ===== LLM (spec 4.4 steps 5–6; Unity-ported request shape + retry) =====
+  // ===== LLM (spec 4.4 steps 5–6; spec 12: Claude Messages API + retry) =====
   const tLlm = Date.now();
-  const result = await gemini.generateReply(character, session.turns, userText);
+  const result = await claude.generateReply(character, session.turns, userText);
   const llmMs = Date.now() - tLlm;
 
   if (!result.ok) {
@@ -155,14 +155,30 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
     await events.logEvent({
       type: 'provider_error', severity: 'error',
       schoolId: device.schoolId, headsetId: device.headsetId, sessionId,
-      detail: { provider: 'gemini' },
+      detail: { provider: 'claude' },
     });
-    alerts.feedProviderError('gemini', { schoolName: school.schoolName, headsetLabel: device.label });
+    alerts.feedProviderError('claude', { schoolName: school.schoolName, headsetLabel: device.label });
     return res.status(502).json({ error: 'Upstream model unavailable' });
   }
 
+  if (result.empty) {
+    // No text came back (e.g. max_tokens spent on thinking). Not a safety
+    // condition: ops-only llm_empty event with NO text, then 502 so the device
+    // shows its in-character network line. Nothing is stored.
+    await events.logEvent({
+      type: 'llm_empty', severity: 'warning',
+      schoolId: device.schoolId, headsetId: device.headsetId, sessionId,
+      detail: {
+        provider: 'claude', characterId, modelName: character.modelName,
+        stopReason: result.stopReason, outputTokens: result.outputTokens, llmMs,
+      },
+    });
+    return res.status(502).json({ error: 'Upstream model returned no text' });
+  }
+
   if (result.safetyBlocked) {
-    // In-character redirect; the user turn is NOT stored (spec 4.4 step 6).
+    // Model refusal (stop_reason "refusal") -> in-character redirect; the user
+    // turn is NOT stored (spec 4.4 step 6). Same message, same event as before.
     await events.logEvent({
       type: 'safety_block', severity: 'warning',
       schoolId: device.schoolId, headsetId: device.headsetId, sessionId,
@@ -209,9 +225,12 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
     headsetId: device.headsetId,
     monthlyBudgetUsd: school.monthlyBudgetUsd,
     modelName: character.modelName,
+    inferenceGeo: result.inferenceGeo,
     sttSeconds: sttSeconds || 0,
     llmInputChars: result.inputChars,
     llmOutputChars: result.outputChars,
+    llmInputTokens: result.inputTokens,
+    llmOutputTokens: result.outputTokens,
     ttsChars: tts.cached || tts.failed ? 0 : replyText.length, // cache hits cost $0
   });
   if (usage.crossedWarn80) {
@@ -239,6 +258,9 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
       costUsd: usage.costUsd,
       ttsCached: tts.cached === true,
       characterId,
+      llmInputTokens: result.inputTokens,
+      llmOutputTokens: result.outputTokens,
+      stopReason: result.stopReason,
     },
   });
 

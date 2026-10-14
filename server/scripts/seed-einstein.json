@@ -22,7 +22,8 @@
     "speakingRate": 0.90,
     "pitch": -4.0
   },
-  "modelName": "gemini-2.5-flash-lite",
+  "modelName": "claude-haiku-5-5",
+  "effort": "low",
   "maxWords": 40,
   "maxTurns": 8
 }

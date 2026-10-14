@@ -6,6 +6,7 @@ const express = require('express');
 const { adminAuth } = require('./auth');
 const { getDb } = require('./db');
 const characters = require('./characters');
+const claude = require('./providers/claude');
 const metering = require('./metering');
 const events = require('./events');
 const log = require('./log');
@@ -93,6 +94,17 @@ router.put('/characters/:characterId', async (req, res, next) => {
     const doc = req.body;
     if (!doc || typeof doc !== 'object' || !doc.systemPersona) {
       return res.status(400).json({ error: 'Body must be a full character doc (systemPersona required)' });
+    }
+    // Spec 12: a model with no price entry would be metered at the wrong rate
+    // (and may not exist); an effort the docs don't list would 400 at runtime.
+    // Both fail here, at seed time, instead.
+    if (doc.modelName !== undefined && !metering.isKnownModel(doc.modelName)) {
+      return res.status(400).json({
+        error: `Unknown modelName; must be one of: ${Object.keys(metering.PRICES.llmPerMTokens).join(', ')}`,
+      });
+    }
+    if (doc.effort !== undefined && !claude.EFFORT_VALUES.includes(doc.effort)) {
+      return res.status(400).json({ error: `Invalid effort; must be one of: ${claude.EFFORT_VALUES.join(', ')}` });
     }
     await getDb().collection('characters').doc(characterId).set(doc);
     characters.invalidate(characterId); // this instance serves the update immediately

@@ -2,11 +2,11 @@
 
 Node 20 + Express proxy on Google Cloud Run. The Quest headset makes **one
 authenticated call per turn** (`POST /converse`, audio or text); this server
-owns the provider credentials (Deepgram STT and Google TTS keys; the Gemini LLM
-runs on **Vertex AI** authenticated by the Cloud Run service account — no key),
+owns the provider credentials (Anthropic, Deepgram STT and Google TTS keys),
 the character persona, safety checks, conversation history, cost metering, and
-Slack alerting. Built from `HISTORY_SPEAKS_SPEC3.md`; the LLM was migrated from
-the Gemini Developer API to Vertex AI per `HISTORY_SPEAKS_SPEC4.md`.
+Slack alerting. Built from `HISTORY_SPEAKS_SPEC3.md`; the LLM moved from
+Gemini/Vertex AI to the **Anthropic Claude API** (Claude Haiku 5.5, Sonnet 5.5
+as a per-character fallback) per `HISTORY_SPEAKS_SPEC12.md`.
 
 ## Layout
 
@@ -19,7 +19,7 @@ server/
     admin.js            /admin/* provisioning endpoints
     providers/
       deepgram.js       STT (Nova-3 pre-recorded)
-      gemini.js         LLM — Vertex AI, service-account auth (safetySettings, generationConfig, retry)
+      claude.js         LLM — Anthropic Messages API (adaptive thinking, effort, US inference_geo, retry + 12s deadline)
       googleTts.js      TTS (LINEAR16 24kHz, 200-entry LRU cache)
     safety.js           crisis + profanity + jailbreak checks (server copy)
     characters.js       character config (Firestore, 5-min in-memory cache)
@@ -31,8 +31,8 @@ server/
     db.js               Firestore singleton (swappable for tests)
     log.js              structured JSON logging
   scripts/
-    seed-einstein.json  the full Einstein character doc
-    smoke.js            in-process smoke test (mocked providers, fake Firestore)
+    seed-*.json         one full character doc per character (modelName + effort included)
+    smoke.js            in-process smoke test (mocked STT/TTS, stubbed Anthropic endpoint, fake Firestore)
   Dockerfile
   .env.example
 ```
@@ -77,9 +77,45 @@ cd server
 npm run smoke
 ```
 
-Gemini is mocked here, so the smoke test needs no Vertex credentials or network.
-The real end-to-end Vertex AI round-trip is verified on-device / against the
-deployed service, not in this offline test.
+The Anthropic endpoint is a local fetch stub, so the smoke test needs no key or
+network — but the **real** `claude.js` runs against it, so request headers,
+body shape (strict user/assistant alternation, ending with the user turn),
+refusal handling, the `max_tokens`-with-no-text path and 529 retries are all
+exercised. The live round-trip is verified by `scripts/eval-personas.js`
+(Part B of spec 12) and on-device.
+
+## LLM (spec 12)
+
+`src/providers/claude.js` calls `POST https://api.anthropic.com/v1/messages`
+with `x-api-key: $ANTHROPIC_API_KEY` and `anthropic-version: 2023-06-01`.
+
+| Field | Value |
+|---|---|
+| `model` | the character's `modelName` (default `claude-haiku-5-5`; `claude-sonnet-5-5` allowed) |
+| `max_tokens` | 600 (thinking tokens count against it) |
+| `thinking` | `{ "type": "adaptive" }` |
+| `output_config.effort` | the character's `effort` (default `low`; `low`/`medium`/`high`/`xhigh`/`max`) |
+| `inference_geo` | `CLAUDE_INFERENCE_GEO` env, default `us` (data residency; billed 1.1x) |
+| `system` | persona + knowledge-cutoff note + `SAFETY_PREAMBLE` |
+| `messages` | few-shots as user/assistant pairs, windowed text-only history, current user turn |
+
+No `temperature`/`top_p`/`top_k` are sent (Haiku 5.5 rejects non-defaults).
+Thinking blocks are never stored or resent: only text blocks become the reply,
+and sessions store plain text.
+
+Response handling: `stop_reason: "refusal"` → the existing in-character
+`SAFETY_REDIRECT` + `safety_block` event; no text at all (e.g. `max_tokens`
+spent on thinking) → an ops-only `llm_empty` event (no text) and a 502, so the
+device shows its in-character network line.
+
+Retries: 3 attempts, 15 s per attempt, 0.5 s / 1.5 s backoff, on network
+errors, 429, 5xx and 529, honouring `retry-after` — under an **overall 12 s
+deadline** across all attempts, so the server stops (and stops billing) before
+the headset's 15 s timeout.
+
+`PUT /admin/characters/:id` rejects a `modelName` that is not in the price map
+in `src/metering.js` and an `effort` outside the documented values, so a bad
+seed fails at seed time.
 
 ## Voices (spec 10)
 
@@ -158,19 +194,11 @@ gcloud services enable \
   cloudbuild.googleapis.com \
   artifactregistry.googleapis.com \
   firestore.googleapis.com \
-  aiplatform.googleapis.com \
   texttospeech.googleapis.com
 ```
 
-Then grant the Cloud Run runtime service account access to Vertex AI (the LLM
-authenticates as this SA — see "Migrating to Vertex AI" below for the exact
-project ID / SA values and IAM propagation note):
-
-```bash
-gcloud projects add-iam-policy-binding <PROJECT_ID> \
-  --member="serviceAccount:<RUNTIME_SA>" \
-  --role="roles/aiplatform.user"
-```
+The LLM is the Anthropic API (a key in an env var); no Google AI API or IAM
+binding is needed for it.
 
 ### 3. Firestore (Native mode) + TTL
 
@@ -199,29 +227,34 @@ gcloud run deploy hsvr-proxy \
   --source server/ \
   --region us-east1 \
   --allow-unauthenticated \
-  --set-env-vars "DEEPGRAM_API_KEY=<deepgram-key>,GOOGLE_TTS_API_KEY=<tts-key>,SLACK_WEBHOOK_SAFETY=<safety-webhook-url>,SLACK_WEBHOOK_OPS=<ops-webhook-url>,ADMIN_KEY=<generated-admin-key>"
+  --set-env-vars "ANTHROPIC_API_KEY=<anthropic-key>,CLAUDE_INFERENCE_GEO=us,DEEPGRAM_API_KEY=<deepgram-key>,GOOGLE_TTS_API_KEY=<tts-key>,SLACK_WEBHOOK_SAFETY=<safety-webhook-url>,SLACK_WEBHOOK_OPS=<ops-webhook-url>,ADMIN_KEY=<generated-admin-key>"
 ```
 
-There is no `GEMINI_API_KEY`: the LLM uses Vertex AI via the runtime service
-account (granted `roles/aiplatform.user` in step 2). Cloud Run injects
-`GOOGLE_CLOUD_PROJECT` automatically, which the Vertex call uses to build its
-endpoint.
+`ANTHROPIC_API_KEY` is the only LLM credential (create it in the Anthropic
+Console under a workspace dedicated to this app). There is no Vertex/Gemini
+configuration any more.
 
 `--allow-unauthenticated` is correct: our own token middleware enforces auth
 (invalid tokens get 401). Note the service URL the deploy prints — it is the
 `BASE` below and the `proxyBaseUrl` in Unity.
 
-### 6. Seed Einstein
+### 6. Seed the characters
 
 ```bash
 BASE=https://hsvr-proxy-XXXXXXXX-ue.a.run.app   # from the deploy output
 ADMIN=<generated-admin-key>
 
-curl -X PUT "$BASE/admin/characters/einstein" \
-  -H "X-Admin-Key: $ADMIN" \
-  -H "Content-Type: application/json" \
-  --data-binary @server/scripts/seed-einstein.json
+for c in einstein mlk cleopatra caesar lincoln; do
+  curl -X PUT "$BASE/admin/characters/$c" \
+    -H "X-Admin-Key: $ADMIN" \
+    -H "Content-Type: application/json" \
+    --data-binary @server/scripts/seed-$c.json
+done
 ```
+
+On Windows use `curl.exe` and `--data "@server/scripts/seed-einstein.json"`.
+Every seed carries `"modelName": "claude-haiku-5-5"` and `"effort": "low"`;
+the PUT rejects any model not in the price map or an unknown effort.
 
 ### 7. Provision schools and headsets
 
@@ -259,52 +292,15 @@ Build to Quest and run the section 10 test checklist from the spec.
 
 Once the proxy is confirmed working on-device, kill every key that ever lived in
 an Inspector field / scene file (they exist in git history):
-- **Gemini:** simply **revoke** the old Developer-API key — it is no longer used
-  at all (the LLM now runs on Vertex AI via the service account, with no key).
+- **Gemini:** delete the old Developer-API key ("HS - Gemini API Key") — nothing
+  uses it; the LLM is now the Anthropic API.
 - **Deepgram and Google TTS:** **revoke and regenerate**; the new keys live only
   in Cloud Run env vars.
 
-## Migrating to Vertex AI (Spec 4)
+## Migrating to the Claude API (Spec 12)
 
-The LLM call moved from the Gemini Developer API
-(`generativelanguage.googleapis.com`, billed via AI Studio prepay credits the
-Cloud trial does not cover) to **Vertex AI** (`aiplatform.googleapis.com`,
-billed as a normal Cloud service), authenticated by the Cloud Run runtime
-service account instead of `GEMINI_API_KEY`. To migrate an existing deployment,
-run these once, in order.
-
-### 1. Grant the runtime service account Vertex access
-
-```bash
-PROJECT_ID=project-e8bab267-6dfb-401d-a39
-RUNTIME_SA=697766265632-compute@developer.gserviceaccount.com
-
-gcloud services enable aiplatform.googleapis.com --project "$PROJECT_ID"
-gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-  --member="serviceAccount:$RUNTIME_SA" \
-  --role="roles/aiplatform.user"
-```
-
-IAM propagation can take ~1 minute — wait before redeploying.
-
-### 2. Redeploy the new code, then drop the old key var
-
-Deploy the new code first (it no longer reads `GEMINI_API_KEY`), then remove the
-now-unused env var — the order is harmless either way:
-
-```bash
-gcloud run deploy hsvr-proxy --source server/ --region us-east1
-gcloud run services update hsvr-proxy --region us-east1 --remove-env-vars GEMINI_API_KEY
-```
-
-### 3. Verify
-
-```bash
-curl "$BASE/status"        # -> { "ok": true }
-# On the Quest: ask a question -> expect text AND voice (Vertex reply + TTS).
-curl "$BASE/admin/usage?schoolId=<schoolId>&month=$(date +%Y-%m)" -H "X-Admin-Key: $ADMIN"
-# -> 200 with cost data; Gemini spend now appears under "Vertex AI" in Cloud billing.
-```
+See the **Spec 12 cutover runbook** section below (Part I) — it is run by hand,
+in order, and records the previous Cloud Run revision for rollback.
 
 ## Operational notes
 
@@ -323,3 +319,7 @@ curl "$BASE/admin/usage?schoolId=<schoolId>&month=$(date +%Y-%m)" -H "X-Admin-Ke
   it in one click.
 - Character changes (`PUT /admin/characters/einstein`) are picked up by other
   running instances within 5 minutes (in-memory cache TTL); no app rebuild.
+- **LLM cost** is computed from the token counts Claude reports (not chars/4),
+  at the prices in `src/metering.js`, times 1.1 when `inference_geo` is `us`.
+  The usage doc keeps the `llmInputChars`/`llmOutputChars` counters and adds
+  `llmInputTokens`/`llmOutputTokens`.
