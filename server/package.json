@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "smoke": "node scripts/smoke.js"
+    "smoke": "node scripts/smoke.js",
+    "eval": "node scripts/eval-personas.js"
   },
   "dependencies": {
     "@google-cloud/firestore": "^7.10.0",

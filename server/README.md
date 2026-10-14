@@ -117,6 +117,28 @@ the headset's 15 s timeout.
 in `src/metering.js` and an `effort` outside the documented values, so a bad
 seed fails at seed time.
 
+### Persona eval (spec 12 Part B)
+
+`scripts/eval-personas.js` runs every seeded character through six prompts
+(curriculum question, follow-up, break-character, profanity bait, post-era
+question, hardest sensitive question) under four configs — `haiku-5-5@low`,
+`haiku-5-5@medium`, `sonnet-5-5@low`, `haiku-5-5@no-thinking` — against the
+live API, using the production request builder. It writes
+`eval/report-<date>.md` with every reply, word count, latency, `stop_reason`,
+tokens and cost, plus a per-config summary (mean/p95 latency, mean words,
+counts over 40 and 60 words, refusals, total cost).
+
+```bash
+cd server
+export ANTHROPIC_API_KEY=...          # local only, never committed
+npm run eval                          # all seeds, all configs (~240 calls)
+npm run eval -- --characters einstein,mlk --configs haiku-5-5@low
+npm run eval -- --dry-run             # print the plan and a sample request, no calls
+```
+
+Commit the report. Replies are raw (pre-truncation) so the report shows how
+each config obeys the 40-word rule on its own.
+
 ## Voices (spec 10)
 
 Each character's seed JSON carries a `voice` block
