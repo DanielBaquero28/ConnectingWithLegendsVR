@@ -269,7 +269,7 @@ public class VoiceRecognitionController : MonoBehaviour
             Debug.LogWarning("[DIAG] No captured AudioClip reference to analyze.");
         }
 
-        string audioPath = audioRecorder.SaveWavFile(null, Application.persistentDataPath + "/audio_prompt.wav");
+        string audioPath = audioRecorder.SaveWavFile(null, AudioPromptCleanup.FilePath);
         Debug.Log($"[Voice] Audio saved to: {audioPath}");
 
         // [DIAG] temporary: report the saved WAV's byte length on disk.
@@ -286,13 +286,23 @@ public class VoiceRecognitionController : MonoBehaviour
         // One round trip to the proxy: STT + reply + voice come back together.
         // The AI controller owns the request lock, the session ID, and all
         // display (transcript into the field, reply text, audio, field clear).
-        if (aiController != null)
+        try
         {
-            yield return StartCoroutine(aiController.ConverseFromVoiceWav(audioPath));
+            if (aiController != null)
+            {
+                yield return StartCoroutine(aiController.ConverseFromVoiceWav(audioPath));
+            }
+            else
+            {
+                Debug.LogWarning("[Voice] aiController not assigned; cannot send recording.");
+            }
         }
-        else
+        finally
         {
-            Debug.LogWarning("[Voice] aiController not assigned; cannot send recording.");
+            // Spec 12 Part E, belt and braces: ProxyClient already deletes the
+            // WAV right after reading it, but a turn dropped by the request lock
+            // (or a missing controller) never reaches ProxyClient at all.
+            AudioPromptCleanup.DeleteQuietly(audioPath, "after turn");
         }
 
         HideProcessing();

@@ -92,7 +92,27 @@ public class ProxyClient : MonoBehaviour
             onFail?.Invoke();
             yield break;
         }
-        byte[] wavBytes = File.ReadAllBytes(wavPath);
+
+        // Spec 12 Part E: the WAV is deleted the moment its bytes are in memory,
+        // whether or not the read succeeded — student audio never lingers on disk.
+        byte[] wavBytes = null;
+        try
+        {
+            wavBytes = File.ReadAllBytes(wavPath);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError("[Proxy] Could not read WAV file: " + e.GetType().Name);
+        }
+        finally
+        {
+            AudioPromptCleanup.DeleteQuietly(wavPath, "after read");
+        }
+        if (wavBytes == null)
+        {
+            onFail?.Invoke();
+            yield break;
+        }
 
         yield return SendWithRetries(() =>
         {
