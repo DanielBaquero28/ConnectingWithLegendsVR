@@ -21,7 +21,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { buildAudioConfig, supportsProsodyParams } = require('../src/voice');
+const { buildAudioConfig, supportsProsodyParams, assertVoiceAllowed } = require('../src/voice');
 
 const TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize';
 const REPO_ROOT = path.join(__dirname, '..', '..');
@@ -52,6 +52,10 @@ function loadVoice(seedPath) {
       throw new Error(`Seed ${resolved} voice block is missing "${field}"`);
     }
   }
+
+  // Spec 12 Part C: a Chirp voice with ALLOW_GENERATIVE_TTS off fails here,
+  // loudly, before anything is rendered or seeded.
+  assertVoiceAllowed(voice.voiceName, `Seed ${resolved}`);
 
   return { voice, displayName: seed.displayName || path.basename(resolved) };
 }

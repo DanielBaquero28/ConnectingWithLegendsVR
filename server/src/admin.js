@@ -7,6 +7,7 @@ const { adminAuth } = require('./auth');
 const { getDb } = require('./db');
 const characters = require('./characters');
 const claude = require('./providers/claude');
+const voice = require('./voice');
 const metering = require('./metering');
 const events = require('./events');
 const log = require('./log');
@@ -105,6 +106,15 @@ router.put('/characters/:characterId', async (req, res, next) => {
     }
     if (doc.effort !== undefined && !claude.EFFORT_VALUES.includes(doc.effort)) {
       return res.status(400).json({ error: `Invalid effort; must be one of: ${claude.EFFORT_VALUES.join(', ')}` });
+    }
+    // Spec 12 Part C: no generative (Chirp) voice may be seeded while
+    // ALLOW_GENERATIVE_TTS is off — fail here, loudly, not silently at synth time.
+    const voiceName = doc.voice && doc.voice.voiceName;
+    if (voiceName && !voice.isVoiceAllowed(voiceName)) {
+      return res.status(400).json({
+        error: `voice.voiceName "${voiceName}" is a generative (Chirp) voice, which is disabled ` +
+          '(set ALLOW_GENERATIVE_TTS=true to allow it, or recast to a Neural2/Studio/WaveNet voice)',
+      });
     }
     await getDb().collection('characters').doc(characterId).set(doc);
     characters.invalidate(characterId); // this instance serves the update immediately

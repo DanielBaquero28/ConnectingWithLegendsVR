@@ -266,16 +266,61 @@ async function main() {
     assert.equal(res.status, 200);
   });
 
-  // --- spec 12: every seed carries a priced model + a documented effort ---
-  await test('every seed file seeds cleanly and declares claude-haiku-5-5 @ low', async () => {
-    for (const file of fs.readdirSync(__dirname).filter((f) => f.startsWith('seed-') && f.endsWith('.json'))) {
+  // --- spec 12: every seed carries a priced model + a documented effort;
+  //     Chirp-voiced seeds are refused while ALLOW_GENERATIVE_TTS is off ---
+  await test('every seed declares claude-haiku-5-5 @ low; Chirp seeds fail loudly unless the flag is on', async () => {
+    const seedFiles = fs.readdirSync(__dirname).filter((f) => f.startsWith('seed-') && f.endsWith('.json'));
+    let chirpSeeds = 0;
+    delete process.env.ALLOW_GENERATIVE_TTS;
+    for (const file of seedFiles) {
       const raw = fs.readFileSync(path.join(__dirname, file), 'utf8');
       const seed = JSON.parse(raw);
       assert.equal(seed.modelName, 'claude-haiku-5-5', `${file} modelName`);
       assert.equal(seed.effort, 'low', `${file} effort`);
       const id = file.slice('seed-'.length, -'.json'.length);
       const res = await realFetch(`${base}/admin/characters/${id}`, { method: 'PUT', headers: admin, body: raw });
-      assert.equal(res.status, 200, `${file} PUT`);
+      if (/chirp/i.test(seed.voice.voiceName)) {
+        chirpSeeds++;
+        assert.equal(res.status, 400, `${file} must be refused with the flag off`);
+        assert.ok((await res.json()).error.includes('Chirp'), `${file} error names Chirp`);
+      } else {
+        assert.equal(res.status, 200, `${file} PUT`);
+      }
+    }
+    // Until MLK, Lincoln and Caesar are recast, those three seeds are Chirp.
+    assert.equal(chirpSeeds, 3, 'expected exactly the three un-recast Chirp seeds');
+
+    process.env.ALLOW_GENERATIVE_TTS = 'true';
+    try {
+      for (const file of seedFiles) {
+        const raw = fs.readFileSync(path.join(__dirname, file), 'utf8');
+        const id = file.slice('seed-'.length, -'.json'.length);
+        const res = await realFetch(`${base}/admin/characters/${id}`, { method: 'PUT', headers: admin, body: raw });
+        assert.equal(res.status, 200, `${file} PUT with ALLOW_GENERATIVE_TTS=true`);
+      }
+    } finally {
+      delete process.env.ALLOW_GENERATIVE_TTS;
+    }
+  });
+
+  await test('live TTS refuses a Chirp voice with the flag off (no request), synthesizes with it on', async () => {
+    const chirpVoice = { languageCode: 'en-US', voiceName: 'en-US-Chirp3-HD-Charon', speakingRate: 1.0, pitch: 0.0 };
+    let fetches = 0;
+    const stubbedFetch = global.fetch;
+    global.fetch = async () => { fetches++; return new Response(JSON.stringify({ audioContent: FAKE_AUDIO_B64 }), { status: 200 }); };
+    try {
+      delete process.env.ALLOW_GENERATIVE_TTS;
+      let r = await realSynthesize('blocked line', chirpVoice);
+      assert.deepEqual(r, { audioBase64: '', cached: false, failed: true, blocked: true });
+      assert.equal(fetches, 0, 'no TTS request is made for a blocked voice');
+
+      process.env.ALLOW_GENERATIVE_TTS = 'true';
+      r = await realSynthesize('allowed line', chirpVoice);
+      assert.equal(r.audioBase64, FAKE_AUDIO_B64);
+      assert.equal(fetches, 1);
+    } finally {
+      global.fetch = stubbedFetch;
+      delete process.env.ALLOW_GENERATIVE_TTS;
     }
   });
 
@@ -698,6 +743,7 @@ async function main() {
       sent.push(JSON.parse(opts.body));
       return { ok: true, status: 200, json: async () => ({ audioContent: FAKE_AUDIO_B64 }) };
     };
+    process.env.ALLOW_GENERATIVE_TTS = 'true'; // the Chirp handling itself is kept and still tested
     try {
       await realSynthesize('chirp line', {
         languageCode: 'en-US', voiceName: 'en-US-Chirp3-HD-Charon', speakingRate: 0.85, pitch: -5.5,
@@ -707,6 +753,7 @@ async function main() {
       });
     } finally {
       global.fetch = stubbedFetch;
+      delete process.env.ALLOW_GENERATIVE_TTS;
     }
 
     assert.equal(sent.length, 2, 'both voices reached the TTS request builder');
@@ -725,25 +772,37 @@ async function main() {
     assert.equal(neural.input.ssml, undefined);
   });
 
-  await test('the WAV renderer applies the same rule, and MLK ships on Charon', async () => {
+  await test('the WAV renderer refuses Chirp seeds with the flag off and applies the Chirp rule with it on', async () => {
     const { supportsProsodyParams, buildAudioConfig } = require('../src/voice');
     // render-speech-wav.js builds its audioConfig from this same module, so the
     // pre-rendered clips cannot drift from live output.
     const { loadVoice } = require('./render-speech-wav');
 
-    const { voice } = loadVoice(path.join(__dirname, 'seed-mlk.json'));
-    assert.equal(voice.voiceName, 'en-US-Chirp3-HD-Charon');
-    assert.equal(supportsProsodyParams(voice.voiceName), false);
-    assert.deepEqual(Object.keys(buildAudioConfig(voice)).sort(), ['audioEncoding', 'sampleRateHertz']);
-    // Fields stay present in the seed for schema consistency, just unused.
-    assert.equal(voice.speakingRate, 1.0);
-    assert.equal(voice.pitch, 0.0);
+    // Flag off: a Chirp seed fails loudly at load time (so nothing renders).
+    delete process.env.ALLOW_GENERATIVE_TTS;
+    assert.throws(() => loadVoice(path.join(__dirname, 'seed-mlk.json')), /Chirp.*ALLOW_GENERATIVE_TTS/);
 
-    // Case-insensitive, and every other shipped seed is untouched by the rule.
+    // Flag on: the spec-10 handling is unchanged.
+    process.env.ALLOW_GENERATIVE_TTS = 'true';
+    try {
+      const { voice } = loadVoice(path.join(__dirname, 'seed-mlk.json'));
+      assert.equal(voice.voiceName, 'en-US-Chirp3-HD-Charon');
+      assert.equal(supportsProsodyParams(voice.voiceName), false);
+      assert.deepEqual(Object.keys(buildAudioConfig(voice)).sort(), ['audioEncoding', 'sampleRateHertz']);
+      // Fields stay present in the seed for schema consistency, just unused.
+      assert.equal(voice.speakingRate, 1.0);
+      assert.equal(voice.pitch, 0.0);
+    } finally {
+      delete process.env.ALLOW_GENERATIVE_TTS;
+    }
+
+    // Case-insensitive, and every non-Chirp seed loads with the flag off and
+    // is untouched by the rule.
     assert.equal(supportsProsodyParams('en-us-chirp3-hd-charon'), false);
     for (const seed of fs.readdirSync(__dirname).filter((f) => f.startsWith('seed-'))) {
+      const raw = JSON.parse(fs.readFileSync(path.join(__dirname, seed), 'utf8'));
+      if (/chirp/i.test(raw.voice.voiceName)) continue;
       const v = loadVoice(path.join(__dirname, seed)).voice;
-      if (/chirp/i.test(v.voiceName)) continue;
       const cfg = buildAudioConfig(v);
       assert.equal(cfg.pitch, v.pitch, `${seed} keeps its pitch`);
       assert.equal(cfg.speakingRate, v.speakingRate, `${seed} keeps its rate`);

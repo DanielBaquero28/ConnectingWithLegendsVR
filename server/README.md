@@ -163,6 +163,30 @@ the lowercase-locale spelling (`en-us-Chirp3-HD-Charon`) also appears in
 Google's docs, and Chirp 3: HD is served from the global/us/eu endpoints, so an
 availability error is a region matter rather than a code one.
 
+### Generative voices are gated (spec 12 Part C)
+
+Chirp 3: HD is a generative model with different data terms, so **any
+`voiceName` containing `Chirp` is refused unless `ALLOW_GENERATIVE_TTS=true`**
+(default: off). The rule lives in `src/voice.js` and is enforced in three
+places:
+
+| Where | With the flag off |
+|---|---|
+| `PUT /admin/characters/:id` | 400 — the seed is not written |
+| `scripts/render-speech-wav.js` / `render-crisis-wav.js` | throws before rendering |
+| live `googleTts.synthesize` | returns `failed: true, blocked: true`; the reply ships text-only and `tts.generative_voice_blocked` is logged with the voice name |
+
+The Chirp handling above is kept intact for when the flag is on. MLK, Lincoln
+and Caesar currently ship on Chirp voices and must be recast before the
+spec 12 cutover (or the flag set): `scripts/list-voices.js` prints the
+non-generative candidates for `en-US`, `en-GB`, `it-IT`, and the list captured
+on 2026-10-14 is in `eval/voice-candidates-2026-10-14.md`.
+
+```bash
+GOOGLE_TTS_API_KEY=... node server/scripts/list-voices.js            # en-US en-GB it-IT
+GOOGLE_TTS_API_KEY=... node server/scripts/list-voices.js en-GB --md  # Markdown table
+```
+
 ### Re-rendering a character's pre-rendered clips
 
 After changing a `voice` block, re-seed the character **and** re-render its

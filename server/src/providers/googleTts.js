@@ -4,7 +4,7 @@
 // 200 entries, keyed on text+voice — cache hits cost $0 and skip metering.
 
 const log = require('../log');
-const { buildAudioConfig, supportsProsodyParams } = require('../voice');
+const { buildAudioConfig, supportsProsodyParams, isVoiceAllowed } = require('../voice');
 
 const TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize';
 const TIMEOUT_MS = 15000;
@@ -30,6 +30,14 @@ function cacheKey(text, voice) {
 // text still reaches the student (the request must not die because TTS did).
 async function synthesize(text, voice) {
   if (!text) return { audioBase64: '', cached: false };
+
+  // Spec 12 Part C: generative (Chirp) voices are blocked unless
+  // ALLOW_GENERATIVE_TTS=true. Fail soft like any other TTS failure — the reply
+  // text still reaches the student — but say why in the logs (voice name only).
+  if (!isVoiceAllowed(voice.voiceName)) {
+    log.error('tts.generative_voice_blocked', { voiceName: voice.voiceName });
+    return { audioBase64: '', cached: false, failed: true, blocked: true };
+  }
 
   const key = cacheKey(text, voice);
   if (cache.has(key)) {
