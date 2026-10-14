@@ -206,6 +206,8 @@ const FAKE_AUDIO_B64 = Buffer.from('RIFFfakewavbytes').toString('base64');
 // exercise the REAL provider against a captured fetch.
 const realSynthesize = googleTts.synthesize;
 googleTts.synthesize = async () => ({ audioBase64: FAKE_AUDIO_B64, cached: false });
+// Likewise kept for the spec-12 Deepgram query-string check.
+const realTranscribe = deepgram.transcribe;
 let deepgramBehavior = () => ({ ok: true, transcript: 'Tell me about trains.', audioSeconds: 4.2 });
 deepgram.transcribe = async () => deepgramBehavior();
 
@@ -807,6 +809,34 @@ async function main() {
       assert.equal(cfg.pitch, v.pitch, `${seed} keeps its pitch`);
       assert.equal(cfg.speakingRate, v.speakingRate, `${seed} keeps its rate`);
     }
+  });
+
+  // --- spec 12 Part D: Deepgram Model Improvement Program opt-out ---
+  await test('every Deepgram request URL carries mip_opt_out=true', async () => {
+    const urls = [];
+    const stubbedFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      urls.push(String(url));
+      assert.equal(opts.headers['Content-Type'], 'audio/wav');
+      return new Response(JSON.stringify({
+        metadata: { duration: 2.5 },
+        results: { channels: [{ alternatives: [{ transcript: 'hello there' }] }] },
+      }), { status: 200 });
+    };
+    try {
+      const r = await realTranscribe(Buffer.alloc(16044, 1));
+      assert.deepEqual(r, { ok: true, transcript: 'hello there', audioSeconds: 2.5 });
+    } finally {
+      global.fetch = stubbedFetch;
+    }
+    assert.equal(urls.length, 1);
+    const u = new URL(urls[0]);
+    assert.equal(u.origin + u.pathname, 'https://api.deepgram.com/v1/listen');
+    assert.equal(u.searchParams.get('mip_opt_out'), 'true', 'outgoing URL opts out of the MIP');
+    assert.equal(u.searchParams.get('model'), 'nova-3', 'existing params unchanged');
+    assert.equal(u.searchParams.get('smart_format'), 'true');
+    assert.equal(u.searchParams.get('punctuate'), 'true');
+    assert.ok(deepgram.DEEPGRAM_URL.includes('mip_opt_out=true'));
   });
 
   // --- no audio persisted anywhere ---

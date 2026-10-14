@@ -8,8 +8,10 @@
 
 const log = require('../log');
 
+// mip_opt_out=true (spec 12 Part D): opts every request out of Deepgram's
+// Model Improvement Program, so student audio is never used for training.
 const DEEPGRAM_URL =
-  'https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&punctuate=true';
+  'https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&punctuate=true&mip_opt_out=true';
 const TIMEOUT_MS = 15000;
 
 // Returns { ok: true, transcript, audioSeconds } or { ok: false }.
@@ -55,4 +57,4 @@ async function transcribe(wavBuffer) {
   }
 }
 
-module.exports = { transcribe };
+module.exports = { transcribe, DEEPGRAM_URL };
