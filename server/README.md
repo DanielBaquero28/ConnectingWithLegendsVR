@@ -351,10 +351,142 @@ an Inspector field / scene file (they exist in git history):
 - **Deepgram and Google TTS:** **revoke and regenerate**; the new keys live only
   in Cloud Run env vars.
 
-## Migrating to the Claude API (Spec 12)
+## Spec 12 cutover runbook (Part I — run by hand, in order)
 
-See the **Spec 12 cutover runbook** section below (Part I) — it is run by hand,
-in order, and records the previous Cloud Run revision for rollback.
+Facts recorded on 2026-10-14, before the cutover:
+
+| | |
+|---|---|
+| Project | `project-e8bab267-6dfb-401d-a39` |
+| Service / region | `hsvr-proxy` / `us-east1` |
+| Service URL | `https://hsvr-proxy-gya3sp4npq-ue.a.run.app` |
+| Runtime SA | `697766265632-compute@developer.gserviceaccount.com` |
+| **Previous revision (rollback target)** | **`hsvr-proxy-00006-gj6`** (100% of traffic before the cutover) |
+| Scaling | min-instances 1, max 10, concurrency 80 |
+| Env vars present on the old revision | `DEEPGRAM_API_KEY`, `GOOGLE_TTS_API_KEY`, `SLACK_WEBHOOK_SAFETY`, `SLACK_WEBHOOK_OPS`, `ADMIN_KEY`, `VERTEX_PROJECT_ID` |
+
+Shell variables used below (Windows: use `curl.exe` and `--data "@file"`):
+
+```bash
+PROJECT_ID=project-e8bab267-6dfb-401d-a39
+BASE=https://hsvr-proxy-gya3sp4npq-ue.a.run.app
+ADMIN=<admin key>
+PREVIOUS_REVISION=hsvr-proxy-00006-gj6
+```
+
+### 0. Before deploying
+
+- Recast MLK, Lincoln and Caesar to non-Chirp voices in their seed files (see
+  `eval/voice-candidates-2026-10-14.md`), or decide to set
+  `ALLOW_GENERATIVE_TTS=true` for now. With the flag off, those three cannot
+  be re-seeded and their live replies ship text-only until recast.
+- Run `npm run smoke` locally: must print `SMOKE PASSED`.
+- Have the Anthropic key ready (Console → a workspace for this app).
+
+### 1. Put the Anthropic key on the service
+
+Secret Manager is the preferred home; a plain env var is acceptable.
+
+```bash
+# Option A — Secret Manager
+gcloud services enable secretmanager.googleapis.com --project "$PROJECT_ID"
+printf '%s' '<anthropic-key>' | gcloud secrets create ANTHROPIC_API_KEY --data-file=- --project "$PROJECT_ID"
+gcloud secrets add-iam-policy-binding ANTHROPIC_API_KEY --project "$PROJECT_ID" \
+  --member="serviceAccount:697766265632-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+# The secret is attached in step 2 with --set-secrets.
+
+# Option B — plain env var (attach in step 2 with --set-env-vars instead)
+```
+
+### 2. Deploy WITHOUT traffic, tagged `spec12`
+
+```bash
+# From the REPO ROOT, on branch spec12-claude-migration.
+gcloud run deploy hsvr-proxy --source server/ --region us-east1 --project "$PROJECT_ID" \
+  --no-traffic --tag spec12 \
+  --min-instances 1 --max-instances 10 --concurrency 80 \
+  --set-secrets "ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest" \
+  --update-env-vars "CLAUDE_INFERENCE_GEO=us" \
+  --remove-env-vars VERTEX_PROJECT_ID
+# Option B instead of --set-secrets:
+#   --update-env-vars "ANTHROPIC_API_KEY=<anthropic-key>,CLAUDE_INFERENCE_GEO=us"
+# Add ",ALLOW_GENERATIVE_TTS=true" to --update-env-vars only if you chose the flag in step 0.
+```
+
+The command prints a tagged URL of the form
+`https://spec12---hsvr-proxy-gya3sp4npq-ue.a.run.app`. Live traffic still goes
+to `$PREVIOUS_REVISION`.
+
+### 3. Smoke the tagged revision
+
+```bash
+TAGGED=https://spec12---hsvr-proxy-gya3sp4npq-ue.a.run.app
+curl "$TAGGED/status"                     # -> { "ok": true }
+
+# Re-seed every live character against the TAGGED URL (new modelName/effort).
+for c in einstein mlk cleopatra caesar lincoln; do
+  curl -X PUT "$TAGGED/admin/characters/$c" -H "X-Admin-Key: $ADMIN" \
+    -H "Content-Type: application/json" --data-binary @server/scripts/seed-$c.json
+done
+# Each must return { "ok": true }. A 400 names the problem (unpriced model,
+# bad effort, or a Chirp voice while ALLOW_GENERATIVE_TTS is off).
+
+# One real turn through Claude + TTS with a dev headset token:
+curl -X POST "$TAGGED/converse" -H "Authorization: Bearer <dev deviceToken>" \
+  -H "Content-Type: application/json" \
+  -d '{ "sessionId": "runbook-0001", "characterId": "einstein", "text": "What is light?" }'
+# -> 200 with replyText and non-empty audioBase64.
+
+# Typed-crisis report path:
+curl -X POST "$TAGGED/crisis-report" -H "Authorization: Bearer <dev deviceToken>" \
+  -H "Content-Type: application/json" \
+  -d '{ "sessionId": "runbook-0001", "characterId": "einstein", "source": "typed" }'
+# -> 202 { ok, eventId } and a 🚨 CRISIS (typed) alert in #hsvr-safety with no text.
+```
+
+Characters re-seeded here are shared by both revisions (same Firestore), so do
+step 4 promptly: the old revision ignores `effort` and would try the Claude
+model name on Vertex — it keeps its own cached docs for up to 5 minutes.
+
+### 4. Switch traffic
+
+```bash
+gcloud run services update-traffic hsvr-proxy --region us-east1 --project "$PROJECT_ID" --to-latest
+curl "$BASE/status"
+```
+
+Then on a Quest: talk to Einstein, MLK, Cleopatra, Caesar and Lincoln — text
+AND voice for each (MLK/Lincoln/Caesar will be text-only if still on Chirp
+with the flag off). Check `#hsvr-ops` for 🔥 ERRORS and
+`$BASE/admin/events?type=llm_empty` for empty-reply events.
+
+### 5. Rollback (if needed)
+
+```bash
+gcloud run services update-traffic hsvr-proxy --region us-east1 --project "$PROJECT_ID" \
+  --to-revisions "$PREVIOUS_REVISION=100"
+# The old revision expects Gemini seeds: re-seed with
+#   git show pre-spec12:server/scripts/seed-<c>.json
+# for each character if you roll back for more than a few minutes.
+```
+
+### 6. After 24 h of clean traffic — remove the Vertex/Gemini leftovers
+
+```bash
+gcloud projects remove-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:697766265632-compute@developer.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+gcloud services disable aiplatform.googleapis.com --project "$PROJECT_ID"
+gcloud services disable generativelanguage.googleapis.com --project "$PROJECT_ID"   # also still enabled
+# Console → APIs & Services → Credentials: delete "HS - Gemini API Key".
+```
+
+### 7. Housekeeping
+
+- Merge `spec12-claude-migration` into `develop` (never directly into `main`).
+- Re-render the intro WAV for any recast character
+  (`scripts/render-speech-wav.js`); crisis WAVs are out of scope for spec 12.
 
 ## Operational notes
 
