@@ -21,6 +21,9 @@ app.get('/status', (req, res) => {
 // The single conversation endpoint (spec 4.4).
 app.use('/converse', require('./converse').router);
 
+// Device-reported typed-path crisis (spec 12 Part G): metadata only, no text.
+app.use('/crisis-report', require('./crisisReport').router);
+
 // Provisioning/inspection endpoints behind X-Admin-Key (spec 4.6).
 app.use('/admin', require('./admin').router);
 

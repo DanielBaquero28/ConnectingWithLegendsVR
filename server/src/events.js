@@ -11,6 +11,8 @@ const SAFETY_EVENT_TYPES = new Set(['crisis', 'profanity', 'jailbreak', 'safety_
 const MAX_SNIPPET_CHARS = 300;
 
 // Never throws — an event-write failure must not take down the request path.
+// Returns the new event's document ID (spec 12 Part G: Slack alerts reference
+// it instead of carrying any text), or null if the write failed.
 async function logEvent({ type, severity, schoolId, headsetId, sessionId, snippet, detail }) {
   try {
     const now = new Date();
@@ -26,9 +28,11 @@ async function logEvent({ type, severity, schoolId, headsetId, sessionId, snippe
     };
     if (snippet) doc.snippet = String(snippet).slice(0, MAX_SNIPPET_CHARS);
     if (detail) doc.detail = detail;
-    await getDb().collection('events').add(doc);
+    const ref = await getDb().collection('events').add(doc);
+    return ref.id;
   } catch (err) {
     log.error('events.write_failed', { type, error: String(err.message || err).slice(0, 200) });
+    return null;
   }
 }
 

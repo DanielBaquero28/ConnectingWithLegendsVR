@@ -43,6 +43,7 @@ server/
 |---|---|---|
 | `GET /status` | none | uptime check |
 | `POST /converse` | `Authorization: Bearer <deviceToken>` | one conversation turn (audio/wav or JSON text) |
+| `POST /crisis-report` | `Authorization: Bearer <deviceToken>` | device-detected typed crisis: `{ sessionId, characterId, source: "typed" }`, no text (spec 12) |
 | `POST /admin/schools` | `X-Admin-Key` | create school |
 | `POST /admin/headsets` | `X-Admin-Key` | create headset, returns deviceToken |
 | `POST /admin/headsets/:token/deactivate` | `X-Admin-Key` | kill-switch |
@@ -217,7 +218,14 @@ node server/scripts/render-speech-wav.js server/scripts/seed-mlk.json intro-mlk.
 - **No provider keys on the device.** The headset holds only the proxy URL
   and a per-headset revocable device token.
 - Crisis messages are surfaced to a monitored Slack channel immediately so a
-  human can follow the school's protocol.
+  human can follow the school's protocol. **Slack payloads carry no student
+  text** (spec 12 Part G): every alert is limited to event type, school,
+  headset label, character, timestamp and the Firestore event ID; staff open
+  the `events` doc by ID for the flagged snippet. Session IDs are not posted.
+- **Typed-path crises** caught by the headset's local filter are reported via
+  `POST /crisis-report` with `{ sessionId, characterId, source: "typed" }` —
+  the student's text never leaves the device — and produce the same `crisis`
+  event (no snippet, 90-day TTL) and the same Slack alert.
 
 ## Deployment runbook (section 9 — run by hand)
 

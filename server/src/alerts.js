@@ -61,14 +61,17 @@ async function shouldFire(key, rule) {
   });
 }
 
-// 🚨 CRISIS — immediate, never throttled. Snippet + sessionId included so a
-// human can act on it (spec 4.7).
-function alertCrisis({ schoolName, headsetLabel, sessionId, snippet }) {
+// 🚨 CRISIS — immediate, never throttled. Spec 12 Part G payload audit: every
+// Slack message carries ONLY event type, school, headset label, character,
+// timestamp and event ID — never student text, reply snippets or session IDs.
+// The flagged text (server-detected crises only) lives in the events doc,
+// which staff open by the event ID below.
+function alertCrisis({ schoolName, headsetLabel, characterId, eventId, source }) {
   try {
     send(
       'SLACK_WEBHOOK_SAFETY',
-      `🚨 CRISIS — school: ${schoolName} — headset: ${headsetLabel} — session: ${sessionId}\n` +
-        `> "${snippet}"\n${stamp()}`
+      `🚨 CRISIS (${source || 'server'}) — school: ${schoolName} — headset: ${headsetLabel} — ` +
+        `character: ${characterId || 'n/a'} — event: ${eventId || 'n/a'}\n${stamp()}`
     );
   } catch (err) {
     log.error('alerts.crisis_failed', { error: String(err.message || err).slice(0, 200) });

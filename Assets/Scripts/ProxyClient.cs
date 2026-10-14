@@ -61,6 +61,18 @@ public class ProxyClient : MonoBehaviour
         public string text;
     }
 
+    // Spec 12 Part G: metadata only — the student's text is NEVER sent.
+    [Serializable]
+    private class CrisisReportRequest
+    {
+        public string sessionId;
+        public string characterId;
+        public string source;
+    }
+
+    private const int CRISIS_REPORT_ATTEMPTS = 3;
+    private const int CRISIS_REPORT_TIMEOUT_SECONDS = 5;
+
     private void Awake()
     {
 #if UNITY_EDITOR
@@ -150,6 +162,51 @@ public class ProxyClient : MonoBehaviour
             request.timeout = TIMEOUT_SECONDS;
             return request;
         }, onDone, onFail);
+    }
+
+    // Spec 12 Part G: tells the server that the LOCAL SafetyFilter caught a
+    // crisis on the typed path, so it is logged and alerted like a server-
+    // detected one. Fire-and-forget: StartCoroutine and move on. It never
+    // touches the AI controller's request lock, never blocks the UI, sends no
+    // student text, and dies silently with the scene if the student leaves.
+    public IEnumerator PostCrisisReport(string sessionId)
+    {
+        string json = JsonUtility.ToJson(new CrisisReportRequest
+        {
+            sessionId = sessionId,
+            characterId = CharacterId,
+            source = "typed",
+        });
+        byte[] body = System.Text.Encoding.UTF8.GetBytes(json);
+
+        for (int attempt = 0; attempt < CRISIS_REPORT_ATTEMPTS; attempt++)
+        {
+            var request = new UnityWebRequest(proxyBaseUrl.TrimEnd('/') + "/crisis-report", "POST");
+            request.uploadHandler = new UploadHandlerRaw(body);
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            request.SetRequestHeader("Authorization", "Bearer " + deviceToken);
+            request.timeout = CRISIS_REPORT_TIMEOUT_SECONDS;
+
+            yield return request.SendWebRequest();
+
+            bool ok = request.result == UnityWebRequest.Result.Success;
+            bool retryable = request.result == UnityWebRequest.Result.ConnectionError ||
+                             (request.result == UnityWebRequest.Result.ProtocolError &&
+                              request.responseCode >= 500 && request.responseCode <= 599);
+            long code = request.responseCode;
+            request.Dispose();
+
+            if (ok)
+            {
+                Debug.Log("[Proxy] Crisis report delivered.");
+                yield break;
+            }
+            Debug.LogWarning($"[Proxy] Crisis report attempt {attempt + 1}/{CRISIS_REPORT_ATTEMPTS} failed (HTTP {code}).");
+            if (!retryable) yield break;
+            if (attempt < CRISIS_REPORT_ATTEMPTS - 1)
+                yield return new WaitForSeconds(BACKOFF[attempt]);
+        }
     }
 
     private string ConverseUrl()

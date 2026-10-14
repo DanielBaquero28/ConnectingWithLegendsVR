@@ -107,10 +107,17 @@ public class AIResponseControllerV2 : MonoBehaviour
     {
         if (safetyFilter != null && safetyFilter.IsCrisis(text))
         {
-            // Crisis path: identical UX, zero latency, NO proxy call.
+            // Crisis path: identical UX, zero latency, NO converse call.
             Debug.LogWarning("[CRISIS] flagged");
             ResponseText.text = SafetyFilter.CrisisMessage;
             PlayCrisisVoice();
+
+            // Spec 12 Part G: fire-and-forget metadata-only report so the
+            // typed path is logged and alerted like a server-detected crisis.
+            // Runs outside the isProcessing lock and never blocks the UI; the
+            // student's text is not sent.
+            if (proxyClient != null)
+                StartCoroutine(proxyClient.PostCrisisReport(sessionId));
             return;
         }
 

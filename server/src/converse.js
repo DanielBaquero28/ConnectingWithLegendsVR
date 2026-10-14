@@ -109,13 +109,16 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
     const character = await characters.getCharacter(characterId);
     const voice = character ? character.voice : FALLBACK_VOICE;
     const tts = await googleTts.synthesize(safety.CRISIS_MESSAGE, voice);
-    await events.logEvent({
+    const eventId = await events.logEvent({
       type: 'crisis', severity: 'critical',
       schoolId: device.schoolId, headsetId: device.headsetId, sessionId,
       snippet: userText,
+      detail: { source: 'server', characterId },
     });
+    // Spec 12 Part G: the alert carries no student text and no session ID —
+    // staff open the event by ID for the snippet.
     alerts.alertCrisis({
-      schoolName: school.schoolName, headsetLabel: device.label, sessionId, snippet: userText,
+      schoolName: school.schoolName, headsetLabel: device.label, characterId, eventId, source: 'server',
     });
     return res.json({
       transcript, replyText: safety.CRISIS_MESSAGE, audioBase64: tts.audioBase64, emptyTranscript: false,

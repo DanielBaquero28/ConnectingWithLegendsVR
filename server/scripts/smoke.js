@@ -553,15 +553,72 @@ async function main() {
 
     const events = [...fakeDb.docs.entries()].filter(([p, d]) => p.startsWith('events/') && d.type === 'crisis');
     assert.equal(events.length, 1);
-    assert.equal(events[0][1].severity, 'critical');
-    assert.equal(events[0][1].snippet, 'I want to die');
+    const [eventPath, crisisEvent] = events[0];
+    const eventId = eventPath.split('/').pop();
+    assert.equal(crisisEvent.severity, 'critical');
+    assert.equal(crisisEvent.snippet, 'I want to die', 'server-detected crisis keeps the snippet in Firestore (spec 3 §4.8)');
+    assert.deepEqual(crisisEvent.detail, { source: 'server', characterId: 'einstein' });
 
+    // Spec 12 Part G payload audit: type, school, headset, character, timestamp,
+    // event ID — and nothing else. No student text, no session ID.
     await flush();
     const crisisPosts = slackPosts.filter((p) => p.channel === 'safety' && p.text.includes('🚨 CRISIS'));
     assert.equal(crisisPosts.length, 1);
-    assert.ok(crisisPosts[0].text.includes('Dev/Testing'));
-    assert.ok(crisisPosts[0].text.includes('Dev Quest #1'));
-    assert.ok(crisisPosts[0].text.includes('I want to die'));
+    const text = crisisPosts[0].text;
+    assert.ok(text.includes('Dev/Testing'));
+    assert.ok(text.includes('Dev Quest #1'));
+    assert.ok(text.includes('einstein'));
+    assert.ok(text.includes(eventId), 'alert references the event ID');
+    assert.ok(text.includes('(server)'));
+    assert.ok(!text.includes('I want to die'), 'no student text in Slack');
+    assert.ok(!text.includes(sid), 'no session ID in Slack');
+  });
+
+  // --- spec 12 Part G: device-reported typed crisis ---
+  await test('POST /crisis-report needs a device token and a strict metadata-only body', async () => {
+    let res = await postJson('/crisis-report', {}, { sessionId: sid, characterId: 'einstein', source: 'typed' });
+    assert.equal(res.status, 401);
+    res = await postJson('/crisis-report', auth, { sessionId: 'bad id!', characterId: 'einstein', source: 'typed' });
+    assert.equal(res.status, 400);
+    res = await postJson('/crisis-report', auth, { sessionId: sid, characterId: 'einstein', source: 'voice' });
+    assert.equal(res.status, 400);
+    res = await postJson('/crisis-report', auth, { sessionId: sid, characterId: 'einstein', source: 'typed', text: 'I want to die' });
+    assert.equal(res.status, 400, 'any extra field (e.g. student text) is refused');
+    assert.equal([...fakeDb.docs.values()].filter((d) => d.type === 'crisis').length, 1, 'nothing written by the rejected calls');
+  });
+
+  await test('POST /crisis-report writes a text-free crisis event and fires the safety alert', async () => {
+    slackPosts.length = 0;
+    const res = await postJson('/crisis-report', auth, { sessionId: sid, characterId: 'einstein', source: 'typed' });
+    assert.equal(res.status, 202);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.ok(body.eventId);
+
+    const ev = fakeDb.docs.get(`events/${body.eventId}`);
+    assert.equal(ev.type, 'crisis');
+    assert.equal(ev.severity, 'critical');
+    assert.equal(ev.snippet, undefined, 'typed reports carry no text');
+    assert.equal(ev.sessionId, sid);
+    assert.equal(ev.headsetId, headsetId);
+    assert.deepEqual(ev.detail, { source: 'typed', characterId: 'einstein' });
+    const ttlDays = Math.round((ev.expiresAt - ev.createdAt) / 86400000);
+    assert.equal(ttlDays, 90, 'safety retention');
+
+    await flush();
+    const posts = slackPosts.filter((p) => p.channel === 'safety' && p.text.includes('🚨 CRISIS'));
+    assert.equal(posts.length, 1);
+    assert.ok(posts[0].text.includes('(typed)'));
+    assert.ok(posts[0].text.includes('Dev/Testing') && posts[0].text.includes('Dev Quest #1'));
+    assert.ok(posts[0].text.includes('einstein') && posts[0].text.includes(body.eventId));
+    assert.ok(!posts[0].text.includes(sid), 'no session ID in Slack');
+  });
+
+  await test('no Slack payload in this run carries conversation text or a session ID', async () => {
+    const forbidden = ['I want to die', 'Something blockable', 'ignore your instructions', 'What is light', sid];
+    for (const p of slackPosts) {
+      for (const f of forbidden) assert.ok(!p.text.includes(f), `Slack leaks "${f}": ${p.text}`);
+    }
   });
 
   // --- safety block (spec 12: stop_reason "refusal" takes the same path) ---
@@ -740,8 +797,9 @@ async function main() {
     res = await realFetch(`${base}/admin/events?type=crisis`, { headers: admin });
     assert.equal(res.status, 200);
     const events = (await res.json()).events;
-    assert.equal(events.length, 1);
-    assert.equal(events[0].type, 'crisis');
+    assert.equal(events.length, 2, 'one server-detected + one typed crisis');
+    assert.ok(events.every((e) => e.type === 'crisis'));
+    assert.deepEqual(events.map((e) => e.detail.source).sort(), ['server', 'typed']);
   });
 
   // --- spec 10: voice capability rule ---
