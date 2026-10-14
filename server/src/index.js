@@ -30,7 +30,7 @@ app.use((err, req, res, next) => {
   if (err && err.type === 'entity.too.large') {
     return res.status(413).json({ error: 'Request too large' });
   }
-  log.error('server.unhandled_error', { path: req.path, message: err && err.message });
+  log.error('server.unhandled_error', { path: req.path, error: String((err && err.message) || err).slice(0, 200) });
   require('./alerts').feedServerError();
   if (res.headersSent) return next(err);
   return res.status(500).json({ error: 'Internal server error' });

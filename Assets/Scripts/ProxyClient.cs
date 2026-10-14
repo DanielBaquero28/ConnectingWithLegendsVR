@@ -176,8 +176,14 @@ public class ProxyClient : MonoBehaviour
 
             if (verboseLogging)
             {
+                // Spec 12 Part F: the raw body holds the transcript and reply, so it
+                // is only ever printed in the Editor. Device builds log the size.
                 string rawBody = request.downloadHandler != null ? request.downloadHandler.text : "";
+#if UNITY_EDITOR
                 Debug.Log($"[ProxyClient] HTTP {request.responseCode} body: {rawBody}");
+#else
+                Debug.Log($"[ProxyClient] HTTP {request.responseCode} body length: {(rawBody != null ? rawBody.Length : 0)}");
+#endif
             }
 
             if (request.result == UnityWebRequest.Result.Success)
@@ -219,7 +225,8 @@ public class ProxyClient : MonoBehaviour
         }
         catch (Exception e)
         {
-            Debug.LogError("[Proxy] Response parse error: " + e.Message);
+            // Type only: a parser message could echo fragments of the body.
+            Debug.LogError("[Proxy] Response parse error: " + e.GetType().Name);
         }
 
         if (response == null)

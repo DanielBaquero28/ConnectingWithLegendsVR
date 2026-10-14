@@ -88,7 +88,7 @@ async function synthesize(text, voice) {
     cache.set(key, audioBase64);
     return { audioBase64, cached: false };
   } catch (err) {
-    log.error('tts.failed', { message: err.message });
+    log.error('tts.failed', { error: String(err.message || err).slice(0, 200) });
     return { audioBase64: '', cached: false, failed: true };
   }
 }

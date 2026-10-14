@@ -32,7 +32,7 @@ function send(webhookEnvName, text) {
     .then((res) => {
       if (!res.ok) log.error('alerts.send_failed', { webhook: webhookEnvName, status: res.status });
     })
-    .catch((err) => log.error('alerts.send_failed', { webhook: webhookEnvName, message: err.message }));
+    .catch((err) => log.error('alerts.send_failed', { webhook: webhookEnvName, error: String(err.message || err).slice(0, 200) }));
 }
 
 function stamp() {
@@ -71,7 +71,7 @@ function alertCrisis({ schoolName, headsetLabel, sessionId, snippet }) {
         `> "${snippet}"\n${stamp()}`
     );
   } catch (err) {
-    log.error('alerts.crisis_failed', { message: err.message });
+    log.error('alerts.crisis_failed', { error: String(err.message || err).slice(0, 200) });
   }
 }
 
@@ -87,7 +87,7 @@ async function feedPattern({ headsetId, schoolName, headsetLabel }) {
       );
     }
   } catch (err) {
-    log.error('alerts.pattern_failed', { message: err.message });
+    log.error('alerts.pattern_failed', { error: String(err.message || err).slice(0, 200) });
   }
 }
 
@@ -101,7 +101,7 @@ function alertBudget({ schoolName, percent, totalCostUsd, monthlyBudgetUsd }) {
         `($${totalCostUsd.toFixed(2)} of $${monthlyBudgetUsd.toFixed(2)}).\n${stamp()}`
     );
   } catch (err) {
-    log.error('alerts.budget_failed', { message: err.message });
+    log.error('alerts.budget_failed', { error: String(err.message || err).slice(0, 200) });
   }
 }
 
@@ -116,7 +116,7 @@ async function feedProviderError(provider, { schoolName, headsetLabel } = {}) {
       );
     }
   } catch (err) {
-    log.error('alerts.provider_errors_failed', { message: err.message });
+    log.error('alerts.provider_errors_failed', { error: String(err.message || err).slice(0, 200) });
   }
 }
 
@@ -127,7 +127,7 @@ async function feedServerError() {
       send('SLACK_WEBHOOK_OPS', `🟥 5xx — 3+ unhandled server errors within 5 minutes.\n${stamp()}`);
     }
   } catch (err) {
-    log.error('alerts.server_errors_failed', { message: err.message });
+    log.error('alerts.server_errors_failed', { error: String(err.message || err).slice(0, 200) });
   }
 }
 

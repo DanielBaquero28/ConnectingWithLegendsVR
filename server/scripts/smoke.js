@@ -141,6 +141,16 @@ class FakeDoc {
 const fakeDb = new FakeFirestore();
 require('../src/db').setDb(fakeDb);
 
+// ===== Capture every structured log line (spec 12 Part F) =====
+// The server logs via console.log(JSON.stringify(entry)); keep every line so
+// the end-of-run sweep can prove no conversation text ever reached the logs.
+const logLines = [];
+const realConsoleLog = console.log;
+console.log = (...args) => {
+  if (args.length === 1 && typeof args[0] === 'string' && args[0].startsWith('{')) logLines.push(args[0]);
+  realConsoleLog(...args);
+};
+
 // ===== Fetch stub: Slack webhooks + the Anthropic Messages endpoint =====
 // TTS and STT are mocked at module level, so the only external fetches allowed
 // are Slack and api.anthropic.com; anything else fails the test. Local app
@@ -837,6 +847,58 @@ async function main() {
     assert.equal(u.searchParams.get('smart_format'), 'true');
     assert.equal(u.searchParams.get('punctuate'), 'true');
     assert.ok(deepgram.DEEPGRAM_URL.includes('mip_opt_out=true'));
+  });
+
+  // --- spec 12 Part F: logger guard ---
+  await test('log guard drops text/transcript/reply/snippet/prompt and long message fields, keeps the rest', async () => {
+    const log = require('../src/log');
+    const longMsg = 'x'.repeat(41);
+    const shortMsg = 'short enough';
+    const captured = [];
+    const prev = console.log;
+    console.log = (line) => captured.push(line);
+    try {
+      log.info('guard.test', {
+        text: 'student said this', transcript: 'and this', reply: 'character said this',
+        snippet: 'flagged this', prompt: 'persona prompt', message: longMsg,
+        count: 3, status: 502, error: 'Boom: ' + 'y'.repeat(190),
+        nested: { text: 'deep student text', message: longMsg, ok: true, note: shortMsg },
+      });
+      log.error('guard.short', { message: shortMsg });
+    } finally {
+      console.log = prev;
+    }
+    assert.equal(captured.length, 2);
+    const entry = JSON.parse(captured[0]);
+    assert.equal(entry.message, 'guard.test', 'the event name (top-level message) is kept');
+    for (const k of ['text', 'transcript', 'reply', 'snippet', 'prompt']) assert.equal(entry[k], undefined, `${k} dropped`);
+    assert.equal(entry.count, 3);
+    assert.equal(entry.status, 502);
+    assert.ok(entry.error.startsWith('Boom'), 'error key survives (callers cap it at 200)');
+    assert.deepEqual(entry.nested, { ok: true, note: shortMsg }, 'nested payloads are guarded too');
+    assert.ok(!captured[0].includes('student') && !captured[0].includes(longMsg));
+    const second = JSON.parse(captured[1]);
+    assert.equal(second.message, 'guard.short', 'event name kept — a payload message can never overwrite it');
+    assert.equal(second.payloadMessage, shortMsg, 'short payload message kept under payloadMessage');
+    // A short payload `message` (<= 40 chars) is allowed through.
+    const direct = log.sanitize({ message: shortMsg, text: 'no' });
+    assert.deepEqual(direct, { message: shortMsg });
+  });
+
+  await test('no log line emitted during this run contains conversation text', async () => {
+    const forbidden = [
+      'What is light?', 'And what is time?', 'Light is a wonderful puzzle', 'A fine question',
+      'I want to die', 'Something blockable', 'ignore your instructions', 'Tell me about trains',
+      'perfectly normal question', 'Back after the storm', 'secret reasoning',
+    ];
+    assert.ok(logLines.length > 20, 'the capture saw the server logs');
+    for (const line of logLines) {
+      for (const f of forbidden) assert.ok(!line.includes(f), `log line leaks "${f}": ${line.slice(0, 120)}`);
+      const entry = JSON.parse(line);
+      for (const k of ['text', 'transcript', 'reply', 'snippet', 'prompt']) {
+        assert.equal(entry[k], undefined, `log line carries a ${k} key: ${line.slice(0, 120)}`);
+      }
+    }
   });
 
   // --- no audio persisted anywhere ---

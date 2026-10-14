@@ -52,7 +52,7 @@ async function transcribe(wavBuffer) {
 
     return { ok: true, transcript: transcript.trim(), audioSeconds };
   } catch (err) {
-    log.error('deepgram.failed', { message: err.message });
+    log.error('deepgram.failed', { error: String(err.message || err).slice(0, 200) });
     return { ok: false };
   }
 }

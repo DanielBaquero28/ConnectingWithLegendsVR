@@ -28,7 +28,7 @@ async function logEvent({ type, severity, schoolId, headsetId, sessionId, snippe
     if (detail) doc.detail = detail;
     await getDb().collection('events').add(doc);
   } catch (err) {
-    log.error('events.write_failed', { type, message: err.message });
+    log.error('events.write_failed', { type, error: String(err.message || err).slice(0, 200) });
   }
 }
 
