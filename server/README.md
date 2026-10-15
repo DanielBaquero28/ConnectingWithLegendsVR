@@ -138,8 +138,9 @@ with `xhigh`/`max` effort, so a bad seed fails at seed time.
 - **Length.** `SAFETY_PREAMBLE` asks for "two or three short sentences, never
   more than 40 words". A reply at or under the character's `maxWords` (40)
   ships as is. A longer reply is cut at the **last complete sentence that
-  keeps it at or under 50 words** (`maxWords + 10`). Only when there is no
-  sentence boundary inside that allowance is it cut at exactly 50 words,
+  keeps it at or under 60 words** (`maxWords + 20`; raised from 50 after
+  the Part O eval). Only when there is no
+  sentence boundary inside that allowance is it cut at exactly 60 words,
   with no ellipsis. Replies are never cut mid-sentence otherwise.
 - **Few-shots and myths (spec 12 Part O).** Every few-shot reply in the
   seeds is 35 words or fewer (the smoke test checks), and every

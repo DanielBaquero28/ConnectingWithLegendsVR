@@ -370,14 +370,14 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
   return res.json({ transcript, replyText, audioBase64: tts.audioBase64, emptyTranscript: false });
 }
 
-// ===== Length rule (spec 12 Part N) =====
+// ===== Length rule (spec 12 Part N; allowance raised to 60 after Part O) =====
 // A reply at or under maxWords ships as is. Over it, the reply is cut at the
 // last complete sentence that keeps it at or under maxWords + SENTENCE_GRACE
-// words (40 + 10 = 50). Only when there is no sentence boundary inside that
+// words (40 + 20 = 60). Only when there is no sentence boundary inside that
 // allowance is it cut at exactly maxWords + SENTENCE_GRACE words, with no
 // ellipsis. A reply is therefore never cut mid-sentence unless it had no
 // sentence end at all.
-const SENTENCE_GRACE_WORDS = 10;
+const SENTENCE_GRACE_WORDS = 20;
 
 function countWords(text) {
   return text.split(/\s+/).filter((w) => w.length > 0).length;

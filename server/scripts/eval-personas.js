@@ -26,7 +26,7 @@ const path = require('node:path');
 const claude = require('../src/providers/claude');
 const metering = require('../src/metering');
 const safety = require('../src/safety');
-const { fitToSentences, sanitizeResponse } = require('../src/converse');
+const { fitToSentences, sanitizeResponse, SENTENCE_GRACE_WORDS } = require('../src/converse');
 
 // ===== Configs (model @ effort, optional thinking override) =====
 // Haiku 5.5 accepts thinking "disabled" at effort low/medium/high (per the
@@ -302,7 +302,7 @@ function renderReport({ date, characters, configNames, rows, geo }) {
   const L = [];
   L.push(`# Persona eval — ${date}`);
   L.push('');
-  L.push(`Spec 12 Part B. ${characters.length} characters x ${configNames.length} configs x 7 prompts = ${rows.length} calls, against the live Anthropic API via the production request builder (\`src/providers/claude.js\`). Replies are raw model output; "shipped words" and "truncated" show what the proxy's sentence-boundary length rule (spec 12 Part N: cut at the last complete sentence at or under ${characters[0] ? characters[0].maxWords : 40}+10 words) would deliver, and "META LEAK" marks replies the reasoning-leak guard would have retried. Costs use \`src/metering.js\` prices incl. the 1.1x \`inference_geo: us\` multiplier; configured geo for this run: \`${geo}\`.`);
+  L.push(`Spec 12 Part B. ${characters.length} characters x ${configNames.length} configs x 7 prompts = ${rows.length} calls, against the live Anthropic API via the production request builder (\`src/providers/claude.js\`). Replies are raw model output; "shipped words" and "truncated" show what the proxy's sentence-boundary length rule (spec 12 Part N: cut at the last complete sentence at or under ${characters[0] ? characters[0].maxWords : 40}+${SENTENCE_GRACE_WORDS} words) would deliver, and "META LEAK" marks replies the reasoning-leak guard would have retried. Costs use \`src/metering.js\` prices incl. the 1.1x \`inference_geo: us\` multiplier; configured geo for this run: \`${geo}\`.`);
   L.push('');
   L.push(`Characters: ${characters.map((c) => c.characterId).join(', ')}`);
   L.push('');

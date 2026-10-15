@@ -506,30 +506,38 @@ async function main() {
     assert.equal(body.system, 'P\n\nC\n\n' + safety.SAFETY_PREAMBLE);
   });
 
-  await test('long replies are cut at a sentence boundary (<= 50 words), never mid-sentence, and markdown-stripped', async () => {
+  await test('long replies are cut at a sentence boundary (<= 60 words), never mid-sentence, and markdown-stripped', async () => {
     const w = (n, p) => Array.from({ length: n }, (_, i) => p + i).join(' ');
     try {
-      // 2 + 30 + 15 + 10 = 57 words in four sentences -> the first three (47 words).
-      anthropicBehavior = () => claudeReply(`**Bold!** One. ${w(30, 'b')}! ${w(15, 'c')}? ${w(10, 'd')}.`);
+      const { SENTENCE_GRACE_WORDS } = require('../src/converse');
+      assert.equal(SENTENCE_GRACE_WORDS, 20, 'allowance is maxWords + 20 = 60');
+      // 2 + 30 + 25 + 10 = 67 words in five sentences -> all but the last (57 words).
+      anthropicBehavior = () => claudeReply(`**Bold!** One. ${w(30, 'b')}! ${w(25, 'c')}? ${w(10, 'd')}.`);
       let res = await postJson('/converse', auth, { sessionId: sid, text: 'Ramble please' });
       let body = await res.json();
       assert.ok(!body.replyText.includes('*'), 'markdown chars stripped');
-      assert.equal(body.replyText.split(' ').length, 47);
-      assert.ok(body.replyText.endsWith('c14?'), 'ends on a complete sentence');
+      assert.equal(body.replyText.split(' ').length, 57);
+      assert.ok(body.replyText.endsWith('c24?'), 'ends on a complete sentence');
       assert.ok(!body.replyText.includes('...'), 'no ellipsis');
 
-      // 45 words, one sentence: over 40 but within the 50-word allowance -> untouched.
-      anthropicBehavior = () => claudeReply(`${w(45, 'e')}.`);
+      // 55 words, one sentence: over 40 but within the 60-word allowance -> untouched.
+      anthropicBehavior = () => claudeReply(`${w(55, 'e')}.`);
       res = await postJson('/converse', auth, { sessionId: sid, text: 'Again' });
       body = await res.json();
-      assert.equal(body.replyText.split(' ').length, 45);
+      assert.equal(body.replyText.split(' ').length, 55);
 
-      // 60 words with no sentence end at all -> hard cut at 50, no ellipsis.
-      anthropicBehavior = () => claudeReply(w(60, 'f'));
+      // Exactly 60 words over two sentences -> kept whole (the allowance is inclusive).
+      anthropicBehavior = () => claudeReply(`${w(30, 'h')}. ${w(30, 'i')}.`);
+      res = await postJson('/converse', auth, { sessionId: sid, text: 'Edge' });
+      body = await res.json();
+      assert.equal(body.replyText.split(' ').length, 60);
+
+      // 70 words with no sentence end at all -> hard cut at 60, no ellipsis.
+      anthropicBehavior = () => claudeReply(w(70, 'f'));
       res = await postJson('/converse', auth, { sessionId: sid, text: 'Once more' });
       body = await res.json();
-      assert.equal(body.replyText.split(' ').length, 50);
-      assert.ok(body.replyText.endsWith('f49'));
+      assert.equal(body.replyText.split(' ').length, 60);
+      assert.ok(body.replyText.endsWith('f59'));
 
       // 40 words or fewer: as is.
       anthropicBehavior = () => claudeReply(`${w(39, 'g')} end`);
