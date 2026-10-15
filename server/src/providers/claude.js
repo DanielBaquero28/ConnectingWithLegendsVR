@@ -6,8 +6,9 @@
 // messages = few-shots as user/assistant pairs, the windowed live history,
 // then the current user turn. Alternation is enforced defensively (merge
 // same-role neighbours, drop a leading assistant turn) and the list always
-// ends with a user turn. Adaptive thinking at the character's effort (default
-// low); temperature/top_p/top_k are never sent (Haiku 5.5 rejects them).
+// ends with a user turn. Thinking per the character's `thinking` field
+// (default disabled, spec 12 Part N) at the character's effort (default low);
+// temperature/top_p/top_k are never sent (Haiku 5.5 rejects them).
 // Thinking blocks are read for nothing — only text blocks become the reply,
 // and sessions.js stores plain text, so no thinking is ever persisted or
 // resent.
@@ -29,6 +30,15 @@ const DEFAULT_MODEL = 'claude-haiku-5-5';
 const DEFAULT_EFFORT = 'low';
 // Values the current docs list for output_config.effort.
 const EFFORT_VALUES = ['low', 'medium', 'high', 'xhigh', 'max'];
+// Spec 12 Part N: the character's `thinking` field. "disabled" is the
+// production decision (Part B eval); "adaptive" stays available per character.
+// Per the current docs, effort "works whether or not thinking is enabled", so
+// output_config.effort is still sent with thinking disabled. Haiku 5.5 accepts
+// thinking "disabled" at effort high or below only; xhigh/max would 400, which
+// admin.js rejects at seed time.
+const THINKING_VALUES = ['disabled', 'adaptive'];
+const DEFAULT_THINKING = 'disabled';
+const EFFORT_REQUIRING_THINKING = ['xhigh', 'max'];
 // Values the current docs list for the top-level inference_geo parameter.
 const INFERENCE_GEO_VALUES = ['us', 'global'];
 
@@ -49,6 +59,11 @@ function configuredInferenceGeo() {
 function resolveEffort(character) {
   const e = character && character.effort;
   return EFFORT_VALUES.includes(e) ? e : DEFAULT_EFFORT;
+}
+
+function resolveThinking(character) {
+  const t = character && character.thinking;
+  return THINKING_VALUES.includes(t) ? t : DEFAULT_THINKING;
 }
 
 // Stored session turns use Gemini's role name 'model' (Firestore schema is
@@ -112,7 +127,7 @@ function buildRequestBody(character, historyTurns, userText) {
   return {
     model: character.modelName || DEFAULT_MODEL,
     max_tokens: MAX_TOKENS,
-    thinking: { type: 'adaptive' },
+    thinking: { type: resolveThinking(character) },
     output_config: { effort: resolveEffort(character) },
     inference_geo: configuredInferenceGeo(),
     system,
@@ -279,5 +294,8 @@ module.exports = {
   DEFAULT_MODEL,
   DEFAULT_EFFORT,
   EFFORT_VALUES,
+  THINKING_VALUES,
+  DEFAULT_THINKING,
+  EFFORT_REQUIRING_THINKING,
   MAX_TOKENS,
 };

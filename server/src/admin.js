@@ -107,6 +107,17 @@ router.put('/characters/:characterId', async (req, res, next) => {
     if (doc.effort !== undefined && !claude.EFFORT_VALUES.includes(doc.effort)) {
       return res.status(400).json({ error: `Invalid effort; must be one of: ${claude.EFFORT_VALUES.join(', ')}` });
     }
+    // Spec 12 Part N: thinking "disabled" or "adaptive". Per the docs, Haiku
+    // 5.5 returns 400 for thinking disabled at xhigh/max effort — catch it here.
+    if (doc.thinking !== undefined && !claude.THINKING_VALUES.includes(doc.thinking)) {
+      return res.status(400).json({ error: `Invalid thinking; must be one of: ${claude.THINKING_VALUES.join(', ')}` });
+    }
+    const effectiveThinking = doc.thinking !== undefined ? doc.thinking : claude.DEFAULT_THINKING;
+    if (effectiveThinking === 'disabled' && claude.EFFORT_REQUIRING_THINKING.includes(doc.effort)) {
+      return res.status(400).json({
+        error: `effort "${doc.effort}" requires thinking "adaptive" (thinking cannot be disabled at ${claude.EFFORT_REQUIRING_THINKING.join('/')})`,
+      });
+    }
     // Spec 12 Part C: no generative (Chirp) voice may be seeded while
     // ALLOW_GENERATIVE_TTS is off — fail here, loudly, not silently at synth time.
     const voiceName = doc.voice && doc.voice.voiceName;

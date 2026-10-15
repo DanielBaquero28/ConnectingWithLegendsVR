@@ -208,3 +208,21 @@ Then run Part B (all ten characters on every config), commit `server/eval/report
 ## Kickoff (paste into Claude Code)
 
 > Read `HISTORY_SPEAKS_SPEC12.md` in the repo root. Start with Part 0: branch, tag, full review and impact map, no edits, then stop for my approval. After that, implement Parts A–H in order, committing after each part. Show me your plan for each part before implementing it, and show each file change before moving on. Use the current Claude API docs for exact header values, the thinking/effort parameters and any data-residency parameter rather than guessing. Respect the do-not-touch list. Finish with a green offline smoke test, a clean Unity batch compile, the Part H report, and the README runbook for Part I. Do not run Part B against the live API until I confirm the key is set.
+
+---
+
+## Part N — Eval fixes
+
+Decision on Part B: use `haiku-5-5` with thinking disabled for all ten characters. No Sonnet for now.
+
+1. **Thinking setting:** add a `thinking` field to the character seed and admin validation (`"disabled"` or `"adaptive"`). Set all ten seeds to `"disabled"` and send `thinking: { type: "disabled" }` accordingly. Omit `output_config.effort` when thinking is disabled, if the docs require that.
+2. **Length:**
+   - Tighten SAFETY_PREAMBLE to "Answer in two or three short sentences, never more than 40 words."
+   - Change the server truncation so it never cuts mid-sentence. If a reply is over the limit, cut at the last complete sentence at or under 50 words. Only if there's no sentence boundary, cut at 50 words without an ellipsis.
+3. **Reasoning leak guard:** add an output check. If a reply contains meta-language about the conversation or instructions (for example "the student", "I should", "in character", "the user", "my instructions", "system prompt"), don't ship it. Retry once, and if it fails again, return the existing safety redirect line. Write an ops event `reply_meta_leak` with no text.
+4. **Era discipline:** add to SAFETY_PREAMBLE that the character knows nothing that happened after their death or their knowledge cutoff, including honors, memorials, films, currency or anything named after them. If asked, they say they can't know that and steer back to their own time.
+5. **Tubman facts:** correct the head-injury fact in Tubman's seed (she was about twelve or thirteen) and check her seed's other key facts against reliable sources.
+6. **Report button:** disarm it after a safety redirect or crisis message, not only after a new request.
+7. **Re-run Part B** for `haiku-5-5@no-thinking` only, all ten characters. Report: mean and p95 latency; mean words, the count over 40 and over 50 words, and any truncated replies; any meta leaks; the Tubman post-era answer quoted; any reply considered a failure.
+
+Also confirm in writing: (a) the currently installed Quest APK keeps working against the new server for `/converse`, so a server-only cutover can't break headsets in the field; (b) the runbook's deploy step sets `ALLOW_GENERATIVE_TTS=true` for now. Keep the Chirp voices for MLK, Lincoln and Caesar until counsel answers. Don't deploy.

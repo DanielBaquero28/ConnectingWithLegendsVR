@@ -25,15 +25,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 const claude = require('../src/providers/claude');
 const metering = require('../src/metering');
+const safety = require('../src/safety');
+const { fitToSentences, sanitizeResponse } = require('../src/converse');
 
 // ===== Configs (model @ effort, optional thinking override) =====
 // Haiku 5.5 accepts thinking "disabled" at effort low/medium/high (per the
 // current docs), which is what the no-thinking config exercises.
+// Spec 12 Part N: `thinking` is now a character field ("disabled" is the
+// production decision), so every config states it explicitly.
 const CONFIGS = {
-  'haiku-5-5@low':         { modelName: 'claude-haiku-5-5',  effort: 'low' },
-  'haiku-5-5@medium':      { modelName: 'claude-haiku-5-5',  effort: 'medium' },
-  'sonnet-5-5@low':        { modelName: 'claude-sonnet-5-5', effort: 'low' },
-  'haiku-5-5@no-thinking': { modelName: 'claude-haiku-5-5',  effort: 'low', thinking: { type: 'disabled' } },
+  'haiku-5-5@low':         { modelName: 'claude-haiku-5-5',  effort: 'low',    thinking: 'adaptive' },
+  'haiku-5-5@medium':      { modelName: 'claude-haiku-5-5',  effort: 'medium', thinking: 'adaptive' },
+  'sonnet-5-5@low':        { modelName: 'claude-sonnet-5-5', effort: 'low',    thinking: 'adaptive' },
+  'haiku-5-5@no-thinking': { modelName: 'claude-haiku-5-5',  effort: 'low',    thinking: 'disabled' },
 };
 
 // ===== Prompts =====
@@ -150,6 +154,7 @@ function loadCharacters(filter) {
       fewShotExamples: Array.isArray(raw.fewShotExamples) ? raw.fewShotExamples : [],
       modelName: raw.modelName,
       effort: raw.effort,
+      thinking: raw.thinking,
       maxWords: raw.maxWords || 40,
       maxTurns: raw.maxTurns || 8,
     });
@@ -178,8 +183,7 @@ function promptsFor(characterId) {
 // ===== One call =====
 async function callClaude(character, config, history, userText) {
   const body = claude.buildRequestBody(
-    { ...character, modelName: config.modelName, effort: config.effort }, history, userText);
-  if (config.thinking) body.thinking = config.thinking;
+    { ...character, modelName: config.modelName, effort: config.effort, thinking: config.thinking }, history, userText);
 
   const t0 = Date.now();
   let res, json;
@@ -218,9 +222,17 @@ async function callClaude(character, config, history, userText) {
     modelName: config.modelName, inferenceGeo, llmInputTokens: inputTokens, llmOutputTokens: outputTokens,
   });
 
+  // Spec 12 Part N: what the proxy would actually ship for this raw reply —
+  // the sentence-boundary length rule and the reasoning-leak guard.
+  const shipped = text ? fitToSentences(sanitizeResponse(text), character.maxWords) : '';
+  const metaLeak = safety.hasMetaLeak(text);
+
   return {
     text,
     words: text ? text.split(/\s+/).filter(Boolean).length : 0,
+    shippedWords: shipped ? shipped.split(/\s+/).filter(Boolean).length : 0,
+    truncated: Boolean(text) && shipped !== sanitizeResponse(text).trim(),
+    metaLeak,
     latencyMs,
     stopReason: json.stop_reason || null,
     refusalCategory: (json.stop_details && json.stop_details.category) || null,
@@ -288,15 +300,15 @@ function renderReport({ date, characters, configNames, rows, geo }) {
   const L = [];
   L.push(`# Persona eval — ${date}`);
   L.push('');
-  L.push(`Spec 12 Part B. ${characters.length} characters x ${configNames.length} configs x 7 prompts = ${rows.length} calls, against the live Anthropic API via the production request builder (\`src/providers/claude.js\`). Replies are raw model output (before the proxy's ${characters[0] ? characters[0].maxWords : 40}-word truncation). Costs use \`src/metering.js\` prices incl. the 1.1x \`inference_geo: us\` multiplier; configured geo for this run: \`${geo}\`.`);
+  L.push(`Spec 12 Part B. ${characters.length} characters x ${configNames.length} configs x 7 prompts = ${rows.length} calls, against the live Anthropic API via the production request builder (\`src/providers/claude.js\`). Replies are raw model output; "shipped words" and "truncated" show what the proxy's sentence-boundary length rule (spec 12 Part N: cut at the last complete sentence at or under ${characters[0] ? characters[0].maxWords : 40}+10 words) would deliver, and "META LEAK" marks replies the reasoning-leak guard would have retried. Costs use \`src/metering.js\` prices incl. the 1.1x \`inference_geo: us\` multiplier; configured geo for this run: \`${geo}\`.`);
   L.push('');
   L.push(`Characters: ${characters.map((c) => c.characterId).join(', ')}`);
   L.push('');
 
   L.push('## Summary per config');
   L.push('');
-  L.push('| config | calls | errors | mean latency ms | p95 latency ms | mean words | >40 words | >60 words | refusals | max_tokens | empty replies | total cost |');
-  L.push('|---|---|---|---|---|---|---|---|---|---|---|---|');
+  L.push('| config | calls | errors | mean latency ms | p95 latency ms | mean words | >40 words | >50 words | >60 words | truncated | meta leaks | refusals | max_tokens | empty replies | total cost |');
+  L.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const name of configNames) {
     const r = rows.filter((x) => x.config === name);
     const okRows = r.filter((x) => !x.error);
@@ -309,7 +321,10 @@ function renderReport({ date, characters, configNames, rows, geo }) {
       p95(lat),
       mean(okRows.map((x) => x.words)).toFixed(1),
       okRows.filter((x) => x.words > 40).length,
+      okRows.filter((x) => x.words > 50).length,
       okRows.filter((x) => x.words > 60).length,
+      okRows.filter((x) => x.truncated).length,
+      okRows.filter((x) => x.metaLeak).length,
       okRows.filter((x) => x.stopReason === 'refusal').length,
       okRows.filter((x) => x.stopReason === 'max_tokens').length,
       okRows.filter((x) => !x.text).length,
@@ -335,12 +350,12 @@ function renderReport({ date, characters, configNames, rows, geo }) {
   for (const character of characters) {
     L.push(`## ${character.displayName} (\`${character.characterId}\`)`);
     L.push('');
-    L.push('| config | prompt type | prompt | reply | words | latency ms | stop_reason | in tok | out tok | thinking tok | cost |');
-    L.push('|---|---|---|---|---|---|---|---|---|---|---|');
+    L.push('| config | prompt type | prompt | reply | words | shipped words | flags | latency ms | stop_reason | in tok | out tok | thinking tok | cost |');
+    L.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|');
     for (const r of rows.filter((x) => x.characterId === character.characterId)) {
       if (r.error) {
         L.push('| ' + [
-          `\`${r.config}\``, r.promptType, cell(r.prompt), `**ERROR** ${cell(r.error)}`, '', r.latencyMs, '', '', '', '', '',
+          `\`${r.config}\``, r.promptType, cell(r.prompt), `**ERROR** ${cell(r.error)}`, '', '', '', r.latencyMs, '', '', '', '', '',
         ].join(' | ') + ' |');
         continue;
       }
@@ -350,6 +365,8 @@ function renderReport({ date, characters, configNames, rows, geo }) {
         cell(r.prompt),
         cell(r.text || '(no text)'),
         r.words,
+        r.shippedWords,
+        [r.truncated ? 'truncated' : '', r.metaLeak ? 'META LEAK' : ''].filter(Boolean).join(', '),
         r.latencyMs,
         r.stopReason + (r.refusalCategory ? ` (${r.refusalCategory})` : ''),
         r.inputTokens,

@@ -95,8 +95,8 @@ with `x-api-key: $ANTHROPIC_API_KEY` and `anthropic-version: 2023-06-01`.
 |---|---|
 | `model` | the character's `modelName` (default `claude-haiku-5-5`; `claude-sonnet-5-5` allowed) |
 | `max_tokens` | 600 (thinking tokens count against it) |
-| `thinking` | `{ "type": "adaptive" }` |
-| `output_config.effort` | the character's `effort` (default `low`; `low`/`medium`/`high`/`xhigh`/`max`) |
+| `thinking` | `{ "type": <character's thinking> }` — `"disabled"` (default, the production decision from the Part B eval) or `"adaptive"` |
+| `output_config.effort` | the character's `effort` (default `low`; `low`/`medium`/`high`/`xhigh`/`max`). Still sent with thinking disabled — per the docs effort "works whether or not thinking is enabled". `xhigh`/`max` need `"adaptive"` (Haiku 5.5 returns 400 otherwise); the PUT rejects that combination. |
 | `inference_geo` | `CLAUDE_INFERENCE_GEO` env, default `us` (data residency; billed 1.1x) |
 | `system` | persona + knowledge-cutoff note + `SAFETY_PREAMBLE` |
 | `messages` | few-shots as user/assistant pairs, windowed text-only history, current user turn |
@@ -129,8 +129,33 @@ Turns that end in a model refusal or in `llm_empty` are metered (tokens and
 STT seconds) even though no reply shipped — Claude bills them.
 
 `PUT /admin/characters/:id` rejects a `modelName` that is not in the price map
-in `src/metering.js` and an `effort` outside the documented values, so a bad
-seed fails at seed time.
+in `src/metering.js`, an `effort` outside the documented values, a `thinking`
+value other than `disabled`/`adaptive`, and `thinking: "disabled"` combined
+with `xhigh`/`max` effort, so a bad seed fails at seed time.
+
+### Length rule and reasoning-leak guard (spec 12 Part N)
+
+- **Length.** `SAFETY_PREAMBLE` asks for "two or three short sentences, never
+  more than 40 words". A reply at or under the character's `maxWords` (40)
+  ships as is. A longer reply is cut at the **last complete sentence that
+  keeps it at or under 50 words** (`maxWords + 10`). Only when there is no
+  sentence boundary inside that allowance is it cut at exactly 50 words,
+  with no ellipsis. Replies are never cut mid-sentence otherwise.
+- **Era discipline.** The preamble also states that the character knows
+  nothing after their death or knowledge cutoff, including honors, memorials,
+  films, currency or anything named after them, and steers back to their own
+  time when asked.
+- **Reasoning-leak guard.** A reply that talks *about* the conversation or
+  its instructions ("the student", "I should", "in character", "the user",
+  "my instructions", "system prompt", …; `safety.hasMetaLeak`) is never
+  spoken. The server retries the model once; if the retry leaks too, the
+  device gets the existing `SAFETY_REDIRECT` line with `safetyRedirect: true`.
+  One ops event `reply_meta_leak` is written per affected turn — metadata
+  only (`characterId`, `modelName`, `leaks`, `outcome`), no text. Leaked
+  calls are still metered.
+- **`safetyRedirect`** is `true` on the crisis message and the redirect line,
+  so the headset's "Report this answer" button stays disarmed for them.
+  Older APKs ignore the field.
 
 ### Persona eval (spec 12 Part B)
 
@@ -151,7 +176,8 @@ npm run eval -- --characters einstein,mlk --configs haiku-5-5@low
 npm run eval -- --dry-run             # print the plan and a sample request, no calls
 ```
 
-Commit the report. Replies are raw (pre-truncation) so the report shows how
+Commit the report. Replies are raw (the "shipped words" column shows what the
+sentence-boundary length rule would deliver) so the report shows how
 each config obeys the 40-word rule on its own.
 
 ## Voices (spec 10)
@@ -330,8 +356,10 @@ done
 ```
 
 On Windows use `curl.exe` and `--data "@server/scripts/seed-einstein.json"`.
-Every seed carries `"modelName": "claude-haiku-5-5"` and `"effort": "low"`;
-the PUT rejects any model not in the price map or an unknown effort.
+Every seed carries `"modelName": "claude-haiku-5-5"`, `"effort": "low"` and
+`"thinking": "disabled"` (spec 12 Part N); the PUT rejects any model not in
+the price map, an unknown effort or thinking value, or thinking disabled at
+`xhigh`/`max`.
 
 ### 7. Provision schools and headsets
 
@@ -399,10 +427,11 @@ PREVIOUS_REVISION=hsvr-proxy-00006-gj6
 
 ### 0. Before deploying
 
-- Recast MLK, Lincoln and Caesar to non-Chirp voices in their seed files (see
-  `eval/voice-candidates-2026-10-14.md`), or decide to set
-  `ALLOW_GENERATIVE_TTS=true` for now. With the flag off, those three cannot
-  be re-seeded and their live replies ship text-only until recast.
+- MLK, Lincoln and Caesar keep their Chirp voices until counsel answers, so
+  step 2 sets `ALLOW_GENERATIVE_TTS=true` (spec 12 Part N decision). Recast
+  candidates are in `eval/voice-candidates-2026-10-14.md` for later; once
+  recast, drop the flag again. With the flag off, those three cannot be
+  re-seeded and their live replies ship text-only.
 - Run `npm run smoke` locally: must print `SMOKE PASSED`.
 - Have the Anthropic key ready (Console → a workspace for this app).
 
@@ -430,11 +459,12 @@ gcloud run deploy hsvr-proxy --source server/ --region us-east1 --project "$PROJ
   --no-traffic --tag spec12 \
   --min-instances 1 --max-instances 10 --concurrency 80 \
   --set-secrets "ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest" \
-  --update-env-vars "CLAUDE_INFERENCE_GEO=us" \
+  --update-env-vars "CLAUDE_INFERENCE_GEO=us,ALLOW_GENERATIVE_TTS=true" \
   --remove-env-vars VERTEX_PROJECT_ID
+# ALLOW_GENERATIVE_TTS=true keeps the Chirp voices for MLK, Lincoln and Caesar
+# (spec 12 Part N); remove it once those three are recast.
 # Option B instead of --set-secrets:
-#   --update-env-vars "ANTHROPIC_API_KEY=<anthropic-key>,CLAUDE_INFERENCE_GEO=us"
-# Add ",ALLOW_GENERATIVE_TTS=true" to --update-env-vars only if you chose the flag in step 0.
+#   --update-env-vars "ANTHROPIC_API_KEY=<anthropic-key>,CLAUDE_INFERENCE_GEO=us,ALLOW_GENERATIVE_TTS=true"
 ```
 
 The command prints a tagged URL of the form
@@ -447,13 +477,13 @@ to `$PREVIOUS_REVISION`.
 TAGGED=https://spec12---hsvr-proxy-gya3sp4npq-ue.a.run.app
 curl "$TAGGED/status"                     # -> { "ok": true }
 
-# Re-seed every live character against the TAGGED URL (new modelName/effort).
+# Re-seed every live character against the TAGGED URL (new modelName/effort/thinking).
 for c in einstein mlk cleopatra caesar lincoln; do
   curl -X PUT "$TAGGED/admin/characters/$c" -H "X-Admin-Key: $ADMIN" \
     -H "Content-Type: application/json" --data-binary @server/scripts/seed-$c.json
 done
 # Each must return { "ok": true }. A 400 names the problem (unpriced model,
-# bad effort, or a Chirp voice while ALLOW_GENERATIVE_TTS is off).
+# bad effort/thinking, or a Chirp voice while ALLOW_GENERATIVE_TTS is off).
 
 # One real turn through Claude + TTS with a dev headset token:
 curl -X POST "$TAGGED/converse" -H "Authorization: Bearer <dev deviceToken>" \

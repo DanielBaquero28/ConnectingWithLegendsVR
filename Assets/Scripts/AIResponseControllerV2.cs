@@ -160,6 +160,7 @@ public class AIResponseControllerV2 : MonoBehaviour
         {
             // Crisis path: identical UX, zero latency, NO converse call.
             Debug.LogWarning("[CRISIS] flagged");
+            DisarmReportButton(); // Spec 12 Part N: the crisis message is not a reply to report
             ResponseText.text = SafetyFilter.CrisisMessage;
             PlayCrisisVoice();
 
@@ -268,10 +269,13 @@ public class AIResponseControllerV2 : MonoBehaviour
         PromptField.text = "";
 
         // Spec 12 Part M: the report button arms after this reply has played.
+        // Spec 12 Part N: a safety redirect or crisis message is not a
+        // character reply, so the button stays disarmed for it.
         if (reportButton != null)
         {
             DisarmReportButton();
-            reportArmRoutine = StartCoroutine(ArmReportButtonAfterPlayback(source, playing));
+            if (!response.safetyRedirect)
+                reportArmRoutine = StartCoroutine(ArmReportButtonAfterPlayback(source, playing));
         }
     }
 

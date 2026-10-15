@@ -54,6 +54,10 @@ public class ProxyClient : MonoBehaviour
         public string replyText;
         public string audioBase64;
         public bool emptyTranscript;
+        // Spec 12 Part N: true when replyText is the crisis message or the
+        // safety redirect rather than a character reply. Absent on older
+        // servers, which JsonUtility reads as false.
+        public bool safetyRedirect;
     }
 
     [Serializable]

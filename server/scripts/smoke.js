@@ -290,7 +290,7 @@ async function main() {
 
   // --- spec 12: every seed carries a priced model + a documented effort;
   //     Chirp-voiced seeds are refused while ALLOW_GENERATIVE_TTS is off ---
-  await test('every seed declares claude-haiku-5-5 @ low; Chirp seeds fail loudly unless the flag is on', async () => {
+  await test('every seed declares claude-haiku-5-5 @ low, thinking disabled; Chirp seeds fail loudly unless the flag is on', async () => {
     const seedFiles = fs.readdirSync(__dirname).filter((f) => f.startsWith('seed-') && f.endsWith('.json'));
     let chirpSeeds = 0;
     delete process.env.ALLOW_GENERATIVE_TTS;
@@ -299,6 +299,7 @@ async function main() {
       const seed = JSON.parse(raw);
       assert.equal(seed.modelName, 'claude-haiku-5-5', `${file} modelName`);
       assert.equal(seed.effort, 'low', `${file} effort`);
+      assert.equal(seed.thinking, 'disabled', `${file} thinking (spec 12 Part N)`);
       const id = file.slice('seed-'.length, -'.json'.length);
       const res = await realFetch(`${base}/admin/characters/${id}`, { method: 'PUT', headers: admin, body: raw });
       if (/chirp/i.test(seed.voice.voiceName)) {
@@ -419,8 +420,8 @@ async function main() {
 
     assert.equal(body.model, 'claude-haiku-5-5');
     assert.equal(body.max_tokens, 600);
-    assert.deepEqual(body.thinking, { type: 'adaptive' });
-    assert.deepEqual(body.output_config, { effort: 'low' });
+    assert.deepEqual(body.thinking, { type: 'disabled' }, 'spec 12 Part N: the seed says thinking disabled');
+    assert.deepEqual(body.output_config, { effort: 'low' }, 'effort is still sent (docs: effort works with or without thinking)');
     assert.equal(body.inference_geo, 'us');
     for (const k of ['temperature', 'top_p', 'top_k', 'generationConfig', 'safetySettings', 'system_instruction']) {
       assert.equal(body[k], undefined, `${k} must not be sent`);
@@ -495,18 +496,114 @@ async function main() {
     assert.equal(body.system, 'P\n\nC\n\n' + safety.SAFETY_PREAMBLE);
   });
 
-  await test('replies are truncated to maxWords and markdown-stripped', async () => {
-    anthropicBehavior = () => claudeReply(
-      '**Bold!** ' + Array.from({ length: 60 }, (_, i) => 'word' + i).join(' '));
+  await test('long replies are cut at a sentence boundary (<= 50 words), never mid-sentence, and markdown-stripped', async () => {
+    const w = (n, p) => Array.from({ length: n }, (_, i) => p + i).join(' ');
     try {
-      const res = await postJson('/converse', auth, { sessionId: sid, text: 'Ramble please' });
-      const body = await res.json();
+      // 2 + 30 + 15 + 10 = 57 words in four sentences -> the first three (47 words).
+      anthropicBehavior = () => claudeReply(`**Bold!** One. ${w(30, 'b')}! ${w(15, 'c')}? ${w(10, 'd')}.`);
+      let res = await postJson('/converse', auth, { sessionId: sid, text: 'Ramble please' });
+      let body = await res.json();
       assert.ok(!body.replyText.includes('*'), 'markdown chars stripped');
-      assert.equal(body.replyText.split(' ').length, 40, 'capped at 40 words ("..." rides on the last)');
-      assert.ok(body.replyText.endsWith('...'));
+      assert.equal(body.replyText.split(' ').length, 47);
+      assert.ok(body.replyText.endsWith('c14?'), 'ends on a complete sentence');
+      assert.ok(!body.replyText.includes('...'), 'no ellipsis');
+
+      // 45 words, one sentence: over 40 but within the 50-word allowance -> untouched.
+      anthropicBehavior = () => claudeReply(`${w(45, 'e')}.`);
+      res = await postJson('/converse', auth, { sessionId: sid, text: 'Again' });
+      body = await res.json();
+      assert.equal(body.replyText.split(' ').length, 45);
+
+      // 60 words with no sentence end at all -> hard cut at 50, no ellipsis.
+      anthropicBehavior = () => claudeReply(w(60, 'f'));
+      res = await postJson('/converse', auth, { sessionId: sid, text: 'Once more' });
+      body = await res.json();
+      assert.equal(body.replyText.split(' ').length, 50);
+      assert.ok(body.replyText.endsWith('f49'));
+
+      // 40 words or fewer: as is.
+      anthropicBehavior = () => claudeReply(`${w(39, 'g')} end`);
+      res = await postJson('/converse', auth, { sessionId: sid, text: 'Short' });
+      body = await res.json();
+      assert.equal(body.replyText.split(' ').length, 40);
     } finally {
       resetAnthropic();
     }
+  });
+
+  // --- spec 12 Part N: reasoning-leak guard ---
+  await test('a reply that leaks reasoning is retried once; the retry ships and one reply_meta_leak event (no text) is written', async () => {
+    const LEAK = 'The student sincerely asks whether I am an AI. I should answer honestly, then continue in character.';
+    let calls = 0;
+    anthropicBehavior = () => (++calls === 1 ? claudeReply(LEAK) : claudeReply('Light bends around the sun.'));
+    try {
+      const res = await postJson('/converse', auth, { sessionId: sid, text: 'Are you real?' });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.replyText, 'Light bends around the sun.');
+      assert.equal(body.safetyRedirect, undefined);
+      assert.equal(calls, 2, 'exactly one retry');
+      const evs = [...fakeDb.docs.values()].filter((d) => d.type === 'reply_meta_leak');
+      assert.equal(evs.length, 1);
+      assert.deepEqual(evs[0].detail, { characterId: 'einstein', modelName: 'claude-haiku-5-5', leaks: 1, outcome: 'retried' });
+      assert.ok(!JSON.stringify(evs[0]).includes('student'), 'no reply text on the event');
+      assert.equal(evs[0].snippet, undefined);
+      const session = fakeDb.docs.get(`sessions/${sid}`);
+      assert.ok(!JSON.stringify(session).includes('in character'), 'leaked text never stored');
+    } finally {
+      resetAnthropic();
+    }
+  });
+
+  await test('two leaks in a row ship the safety redirect with safetyRedirect: true, store nothing, write one event', async () => {
+    anthropicBehavior = () => claudeReply('Per my instructions I must stay in character for the user.');
+    const before = fakeDb.docs.get(`sessions/${sid}`).turns.length;
+    try {
+      const res = await postJson('/converse', auth, { sessionId: sid, text: 'Tell me a secret' });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.replyText, safety.SAFETY_REDIRECT);
+      assert.equal(body.safetyRedirect, true);
+      assert.equal(fakeDb.docs.get(`sessions/${sid}`).turns.length, before, 'turn not stored');
+      const evs = [...fakeDb.docs.values()].filter((d) => d.type === 'reply_meta_leak');
+      assert.equal(evs.length, 2, 'one more event for this turn');
+      assert.deepEqual(evs[1].detail, { characterId: 'einstein', modelName: 'claude-haiku-5-5', leaks: 2, outcome: 'redirected' });
+      assert.equal([...fakeDb.docs.values()].filter((d) => d.type === 'safety_block').length, 0, 'not logged as a safety block');
+      for (const ev of evs) assert.ok(!JSON.stringify(ev).includes('instructions'), 'no text on the event');
+    } finally {
+      resetAnthropic();
+    }
+  });
+
+  await test('hasMetaLeak flags meta-language and passes ordinary in-character speech', async () => {
+    for (const s of ['The student asked me', 'I should answer honestly', 'then continue in character',
+      'as the user requested', 'My instructions say', 'the system prompt', 'the character I play', 'keep it under 40 words']) {
+      assert.ok(safety.hasMetaLeak(s), `should flag: ${s}`);
+    }
+    for (const s of ['I taught students in Athens.', 'Character matters more than color.', 'Should I tell you of Gaul?',
+      'A fine question! Light is a wonderful puzzle.', 'My character was forged in prison.']) {
+      assert.ok(!safety.hasMetaLeak(s), `should pass: ${s}`);
+    }
+  });
+
+  await test('PUT /admin/characters validates thinking and refuses thinking disabled at xhigh/max', async () => {
+    const seed = JSON.parse(fs.readFileSync(path.join(__dirname, 'seed-einstein.json'), 'utf8'));
+    let res = await realFetch(base + '/admin/characters/einstein', {
+      method: 'PUT', headers: admin, body: JSON.stringify({ ...seed, thinking: 'sometimes' }),
+    });
+    assert.equal(res.status, 400);
+    assert.ok((await res.json()).error.includes('thinking'));
+    res = await realFetch(base + '/admin/characters/einstein', {
+      method: 'PUT', headers: admin, body: JSON.stringify({ ...seed, thinking: 'disabled', effort: 'xhigh' }),
+    });
+    assert.equal(res.status, 400);
+    res = await realFetch(base + '/admin/characters/einstein', {
+      method: 'PUT', headers: admin, body: JSON.stringify({ ...seed, thinking: 'adaptive', effort: 'xhigh' }),
+    });
+    assert.equal(res.status, 200, 'adaptive at xhigh is allowed');
+    // Restore the real seed so later requests use the production config.
+    res = await realFetch(base + '/admin/characters/einstein', { method: 'PUT', headers: admin, body: JSON.stringify(seed) });
+    assert.equal(res.status, 200);
   });
 
   await test('multiple text blocks are concatenated; thinking blocks are ignored', async () => {
@@ -557,6 +654,7 @@ async function main() {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.replyText, safety.CRISIS_MESSAGE);
+    assert.equal(body.safetyRedirect, true, 'spec 12 Part N: flagged so the report button stays disarmed');
     assert.ok(body.audioBase64.length > 0, 'crisis message comes with TTS audio');
     assert.equal(anthropicRequests.length, 0, 'LLM must not be called');
     assert.equal(fakeDb.docs.get(`sessions/${sid}`).turns.length, before, 'turn not stored');
@@ -753,6 +851,7 @@ async function main() {
       assert.equal(res.status, 200);
       const body = await res.json();
       assert.equal(body.replyText, safety.SAFETY_REDIRECT);
+      assert.equal(body.safetyRedirect, true, 'spec 12 Part N: flagged so the report button stays disarmed');
       assert.equal(fakeDb.docs.get(`sessions/${sid}`).turns.length, before);
       const blocks = [...fakeDb.docs.values()].filter((d) => d.type === 'safety_block');
       assert.equal(blocks.length, 1);
@@ -921,7 +1020,9 @@ async function main() {
     assert.ok(/sincerely asks whether they are talking to an AI or to a real person/.test(p));
     assert.ok(/AI recreation made for learning/.test(p));
     assert.ok(/then continue in character/.test(p));
-    assert.ok(/Keep every reply to 40 words or fewer/.test(p), 'existing rules intact');
+    assert.ok(/Answer in two or three short sentences, never more than 40 words/.test(p), 'spec 12 Part N length rule');
+    assert.ok(/nothing that happened after your death or your knowledge cutoff/.test(p), 'spec 12 Part N era rule');
+    assert.ok(/honors, memorials, films, currency, or anything named after you/.test(p));
     anthropicRequests = [];
     await postJson('/converse', auth, { sessionId: sid, text: 'Hello again' });
     assert.ok(anthropicRequests[0].body.system.endsWith(p));

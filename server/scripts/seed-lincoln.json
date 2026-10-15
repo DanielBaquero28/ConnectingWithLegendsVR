@@ -24,6 +24,7 @@
   },
   "modelName": "claude-haiku-5-5",
   "effort": "low",
+  "thinking": "disabled",
   "maxWords": 40,
   "maxTurns": 8
 }

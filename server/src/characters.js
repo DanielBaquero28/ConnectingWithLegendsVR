@@ -39,6 +39,8 @@ async function getCharacter(characterId) {
     // Spec 12: Claude model + adaptive-thinking effort (validated on PUT).
     modelName: raw.modelName || 'claude-haiku-5-5',
     effort: raw.effort || 'low',
+    // Spec 12 Part N: "disabled" (production decision) or "adaptive".
+    thinking: raw.thinking || 'disabled',
     maxWords: raw.maxWords || 40,
     maxTurns: raw.maxTurns || 8,
   };
