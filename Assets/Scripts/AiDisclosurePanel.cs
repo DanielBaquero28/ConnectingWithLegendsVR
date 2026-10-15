@@ -29,6 +29,8 @@ public static class AiDisclosurePanel
     private const string BODY_FORMAT =
         "You're about to talk with an AI recreation of {0}. It's a computer program, " +
         "not the real person, and it can make mistakes.";
+    // Spec 12 Part M: age confirmation, shown under the body text.
+    private const string AGE_LINE = "By continuing, you confirm you're 13 or older.";
     private const string CONTINUE_LABEL = "Continue";
 
     private static readonly Color BACKDROP = new Color(0.04f, 0.04f, 0.05f, 0.92f);
@@ -76,10 +78,12 @@ public static class AiDisclosurePanel
         // --- title + body ---
         TMP_Text title = MakeText("Title", card, new Vector2(w - 60f, 60f), new Vector2(0f, h * 0.5f - 60f),
             TITLE, 34f, FontStyles.Bold);
-        TMP_Text body = MakeText("Body", card, new Vector2(w - 80f, h - 200f), new Vector2(0f, 10f),
+        TMP_Text body = MakeText("Body", card, new Vector2(w - 80f, h - 230f), new Vector2(0f, 30f),
             string.Format(BODY_FORMAT, string.IsNullOrEmpty(displayName) ? "this historical figure" : displayName),
             26f, FontStyles.Normal);
-        if (title == null || body == null)
+        TMP_Text age = MakeText("Age", card, new Vector2(w - 80f, 40f), new Vector2(0f, -h * 0.5f + 120f),
+            AGE_LINE, 22f, FontStyles.Italic);
+        if (title == null || body == null || age == null)
         {
             // No TMP default font: we cannot show the words, so do not pretend
             // to have disclosed anything — tear down and report failure.

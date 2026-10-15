@@ -55,8 +55,17 @@ public class AIResponseControllerV2 : MonoBehaviour
     // network failure / empty transcript / any unhandled error all clear it.
     public event System.Action<bool> ProcessingChanged;
 
+    // Spec 12 Part M: "Report this answer". Built in code under the response
+    // panel (see ReportAnswerButton). Enabled only once a character reply has
+    // finished playing; disabled on press (one report per reply) and whenever
+    // a new request goes out. Null when the scene has no response panel or no
+    // TMP font — everything else works without it.
+    private UnityEngine.UI.Button reportButton;
+    private Coroutine reportArmRoutine;
+
     private void RaiseProcessing(bool value)
     {
+        if (value) DisarmReportButton();
         ProcessingChanged?.Invoke(value);
     }
 
@@ -81,7 +90,49 @@ public class AIResponseControllerV2 : MonoBehaviour
         if (safetyFilter == null)
             Debug.LogWarning("[AI] SafetyFilter not assigned — crisis routing is disabled.");
 
+        if (ResponseText != null)
+        {
+            reportButton = ReportAnswerButton.Build(ResponseText.transform.parent, OnReportAnswer);
+            if (reportButton == null)
+                Debug.LogWarning("[AI] Report button could not be built (no response panel RectTransform or TMP font).");
+        }
+
         Debug.Log($"--- CONNECTION STARTED: proxy session {sessionId} ---");
+    }
+
+    // Spec 12 Part M: one press -> one metadata-only POST /report, outside the
+    // request lock. The button disarms immediately so the same reply cannot
+    // be reported twice from the device (the server ignores repeats anyway).
+    private void OnReportAnswer()
+    {
+        DisarmReportButton();
+        if (proxyClient == null) return;
+        Debug.Log("[AI] Answer reported.");
+        StartCoroutine(proxyClient.PostReport(sessionId));
+    }
+
+    private void DisarmReportButton()
+    {
+        if (reportArmRoutine != null)
+        {
+            StopCoroutine(reportArmRoutine);
+            reportArmRoutine = null;
+        }
+        if (reportButton != null) reportButton.interactable = false;
+    }
+
+    // Arms the button once the reply has been heard: after the AudioSource
+    // stops, or straight away when there was no audio to play.
+    private IEnumerator ArmReportButtonAfterPlayback(AudioSource source, bool playing)
+    {
+        if (playing && source != null)
+        {
+            // One frame so AudioSource.isPlaying reflects the Play() call.
+            yield return null;
+            while (source != null && source.isPlaying) yield return null;
+        }
+        reportArmRoutine = null;
+        if (reportButton != null) reportButton.interactable = true;
     }
 
     public void OnSubmit()
@@ -212,8 +263,16 @@ public class AIResponseControllerV2 : MonoBehaviour
     private void ShowReply(ProxyClient.ConverseResponse response)
     {
         ResponseText.text = response.replyText;
-        AudioPlaybackUtility.PlayBase64Wav(ResolveAudioSource(), response.audioBase64);
+        AudioSource source = ResolveAudioSource();
+        bool playing = AudioPlaybackUtility.PlayBase64Wav(source, response.audioBase64);
         PromptField.text = "";
+
+        // Spec 12 Part M: the report button arms after this reply has played.
+        if (reportButton != null)
+        {
+            DisarmReportButton();
+            reportArmRoutine = StartCoroutine(ArmReportButtonAfterPlayback(source, playing));
+        }
     }
 
     private void PlayCrisisVoice()
@@ -235,6 +294,7 @@ public class AIResponseControllerV2 : MonoBehaviour
         // Server history lives under the session ID; a fresh GUID starts a
         // clean conversation (the old session expires via its 24h TTL).
         sessionId = System.Guid.NewGuid().ToString();
+        DisarmReportButton(); // the old session's reply is no longer on screen
         ResponseText.text = "Conversation restarted.";
         Debug.Log("Conversation restarted with new session " + sessionId);
     }

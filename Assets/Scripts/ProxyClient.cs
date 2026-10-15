@@ -73,8 +73,18 @@ public class ProxyClient : MonoBehaviour
         public string source;
     }
 
-    private const int CRISIS_REPORT_ATTEMPTS = 3;
-    private const int CRISIS_REPORT_TIMEOUT_SECONDS = 5;
+    // Spec 12 Part M: "Report this answer" — metadata only. The server
+    // attaches the last character reply itself; the device sends no text.
+    [Serializable]
+    private class ReportRequest
+    {
+        public string sessionId;
+        public string characterId;
+    }
+
+    // Shared by the fire-and-forget metadata posts (/crisis-report, /report).
+    private const int METADATA_POST_ATTEMPTS = 3;
+    private const int METADATA_POST_TIMEOUT_SECONDS = 5;
 
     private void Awake()
     {
@@ -180,16 +190,40 @@ public class ProxyClient : MonoBehaviour
             characterId = CharacterId,
             source = "typed",
         });
+        yield return PostMetadata("/crisis-report", json, "Crisis report");
+    }
+
+    // Spec 12 Part M: the student pressed "Report this answer". Same
+    // fire-and-forget shape as the crisis report: never blocks the UI, never
+    // touches the request lock, carries no text — the server looks up the
+    // reply it is about from the session. A 409 (nothing to report yet) or a
+    // 200 "duplicate" are both final; only dropped connections and 5xx retry.
+    public IEnumerator PostReport(string sessionId)
+    {
+        string json = JsonUtility.ToJson(new ReportRequest
+        {
+            sessionId = sessionId,
+            characterId = CharacterId,
+        });
+        yield return PostMetadata("/report", json, "Answer report");
+    }
+
+    // Shared delivery loop for the metadata-only posts: 3 attempts, 5 s
+    // timeout each, 0.5 s / 1.5 s backoff, retry only on dropped connections
+    // or 5xx. Bodies are small JSON built by the callers; the log line never
+    // includes the body or the URL's query (there is none).
+    private IEnumerator PostMetadata(string path, string json, string label)
+    {
         byte[] body = System.Text.Encoding.UTF8.GetBytes(json);
 
-        for (int attempt = 0; attempt < CRISIS_REPORT_ATTEMPTS; attempt++)
+        for (int attempt = 0; attempt < METADATA_POST_ATTEMPTS; attempt++)
         {
-            var request = new UnityWebRequest(proxyBaseUrl.TrimEnd('/') + "/crisis-report", "POST");
+            var request = new UnityWebRequest(proxyBaseUrl.TrimEnd('/') + path, "POST");
             request.uploadHandler = new UploadHandlerRaw(body);
             request.downloadHandler = new DownloadHandlerBuffer();
             request.SetRequestHeader("Content-Type", "application/json");
             request.SetRequestHeader("Authorization", "Bearer " + deviceToken);
-            request.timeout = CRISIS_REPORT_TIMEOUT_SECONDS;
+            request.timeout = METADATA_POST_TIMEOUT_SECONDS;
 
             yield return request.SendWebRequest();
 
@@ -202,12 +236,12 @@ public class ProxyClient : MonoBehaviour
 
             if (ok)
             {
-                Debug.Log("[Proxy] Crisis report delivered.");
+                Debug.Log($"[Proxy] {label} delivered.");
                 yield break;
             }
-            Debug.LogWarning($"[Proxy] Crisis report attempt {attempt + 1}/{CRISIS_REPORT_ATTEMPTS} failed (HTTP {code}).");
+            Debug.LogWarning($"[Proxy] {label} attempt {attempt + 1}/{METADATA_POST_ATTEMPTS} failed (HTTP {code}).");
             if (!retryable) yield break;
-            if (attempt < CRISIS_REPORT_ATTEMPTS - 1)
+            if (attempt < METADATA_POST_ATTEMPTS - 1)
                 yield return new WaitForSeconds(BACKOFF[attempt]);
         }
     }

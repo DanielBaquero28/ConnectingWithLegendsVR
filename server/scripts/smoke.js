@@ -631,6 +631,113 @@ async function main() {
     }
   });
 
+  // --- spec 12 Part M: "Report this answer" ---
+  await test('POST /report needs a device token and a strict { sessionId, characterId } body', async () => {
+    let res = await postJson('/report', {}, { sessionId: sid, characterId: 'einstein' });
+    assert.equal(res.status, 401);
+    res = await postJson('/report', auth, { sessionId: 'bad id!', characterId: 'einstein' });
+    assert.equal(res.status, 400);
+    res = await postJson('/report', auth, { sessionId: sid, characterId: 'not a character!' });
+    assert.equal(res.status, 400);
+    res = await postJson('/report', auth, { sessionId: sid, characterId: 'einstein', text: 'the student typed this' });
+    assert.equal(res.status, 400, 'any extra field (e.g. student text) is refused');
+    res = await postJson('/report', auth, { sessionId: sid, characterId: 'einstein', reply: 'spoofed reply' });
+    assert.equal(res.status, 400, 'the device cannot supply the reply text either');
+    assert.equal([...fakeDb.docs.values()].filter((d) => d.type === 'user_report').length, 0, 'nothing written by the rejected calls');
+  });
+
+  await test('POST /report on a session with no character reply is a 409 and writes nothing', async () => {
+    const res = await postJson('/report', auth, { sessionId: 'a1b2c3d4-0000-4000-8000-00000000beef', characterId: 'einstein' });
+    assert.equal(res.status, 409);
+    assert.equal([...fakeDb.docs.values()].filter((d) => d.type === 'user_report').length, 0);
+  });
+
+  await test('POST /report stores ONLY the last character reply, fires a text-free safety alert, TTL 30 days', async () => {
+    slackPosts.length = 0;
+    const session = fakeDb.docs.get(`sessions/${sid}`);
+    const turns = session.turns;
+    const lastTurn = turns[turns.length - 1];
+    assert.equal(lastTurn.role, 'model', 'fixture: the session ends with a character reply');
+    const studentTexts = turns.filter((t) => t.role === 'user').map((t) => t.text);
+    assert.ok(studentTexts.length > 0, 'fixture: the session holds student turns to leak');
+
+    const res = await postJson('/report', auth, { sessionId: sid, characterId: 'einstein' });
+    assert.equal(res.status, 202);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.ok(body.eventId);
+
+    const ev = fakeDb.docs.get(`events/${body.eventId}`);
+    assert.equal(ev.type, 'user_report');
+    assert.equal(ev.severity, 'warning');
+    assert.equal(ev.reply, lastTurn.text, 'the reported character reply is stored');
+    assert.equal(ev.snippet, undefined, 'no snippet field on a user report');
+    assert.equal(ev.sessionId, sid);
+    assert.equal(ev.headsetId, headsetId);
+    assert.deepEqual(ev.detail, { characterId: 'einstein', sessionCharacterId: 'einstein' });
+    const ttlDays = Math.round((ev.expiresAt - ev.createdAt) / 86400000);
+    assert.equal(ttlDays, 30);
+
+    // The whole event, serialised, must contain none of the student's turns.
+    const serialised = JSON.stringify(ev);
+    for (const t of studentTexts) {
+      assert.ok(!serialised.includes(t), `student text "${t}" leaked onto the user_report event`);
+    }
+    assert.equal(Object.keys(ev).filter((k) => !['type', 'severity', 'schoolId', 'headsetId', 'sessionId', 'createdAt', 'expiresAt', 'reply', 'detail'].includes(k)).length, 0,
+      'no unexpected fields on the event');
+
+    // Session history is untouched apart from the report marker.
+    assert.deepEqual(fakeDb.docs.get(`sessions/${sid}`).turns, turns, 'report does not alter the conversation');
+
+    // Slack: type, school, headset, character, timestamp, event ID — nothing else.
+    await flush();
+    const posts = slackPosts.filter((p) => p.channel === 'safety' && p.text.includes('📣 REPORT'));
+    assert.equal(posts.length, 1);
+    const text = posts[0].text;
+    assert.ok(text.includes('Dev/Testing') && text.includes('Dev Quest #1'));
+    assert.ok(text.includes('einstein') && text.includes(body.eventId));
+    assert.ok(!text.includes(lastTurn.text), 'no reply text in Slack');
+    for (const t of studentTexts) assert.ok(!text.includes(t), 'no student text in Slack');
+    assert.ok(!text.includes(sid), 'no session ID in Slack');
+    assert.equal(slackPosts.filter((p) => p.channel === 'ops').length, 0, 'safety channel only');
+  });
+
+  await test('POST /report twice for the same reply is ignored; a new reply can be reported again', async () => {
+    slackPosts.length = 0;
+    const countReports = () => [...fakeDb.docs.values()].filter((d) => d.type === 'user_report').length;
+    const before = countReports();
+
+    let res = await postJson('/report', auth, { sessionId: sid, characterId: 'einstein' });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true, ignored: 'duplicate' });
+    assert.equal(countReports(), before, 'repeat report writes no event');
+    await flush();
+    assert.equal(slackPosts.length, 0, 'repeat report sends no alert');
+
+    // A fresh character reply re-arms the button server-side.
+    anthropicBehavior = () => claudeReply('Imagination is more important than knowledge.');
+    res = await postJson('/converse', auth, { sessionId: sid, text: 'What matters most?' });
+    assert.equal(res.status, 200);
+    resetAnthropic();
+
+    res = await postJson('/report', auth, { sessionId: sid, characterId: 'einstein' });
+    assert.equal(res.status, 202);
+    const body = await res.json();
+    const ev = fakeDb.docs.get(`events/${body.eventId}`);
+    assert.equal(ev.reply, 'Imagination is more important than knowledge.');
+    assert.ok(!JSON.stringify(ev).includes('What matters most?'), 'student text never stored on the event');
+    assert.equal(countReports(), before + 1);
+  });
+
+  await test('POST /report for a session owned by another headset is refused', async () => {
+    const other = fakeDb.docs.get(`sessions/${sid}`);
+    const foreignSid = 'a1b2c3d4-0000-4000-8000-00000000cafe';
+    fakeDb.docs.set(`sessions/${foreignSid}`, { ...other, headsetId: 'some-other-headset' });
+    const res = await postJson('/report', auth, { sessionId: foreignSid, characterId: 'einstein' });
+    assert.equal(res.status, 403);
+    fakeDb.docs.delete(`sessions/${foreignSid}`);
+  });
+
   // --- safety block (spec 12: stop_reason "refusal" takes the same path) ---
   await test('model refusal returns the in-character redirect, logs safety_block, stores nothing', async () => {
     anthropicBehavior = () => anthropicResponse(200, {
@@ -1092,6 +1199,7 @@ async function main() {
       'What is light?', 'And what is time?', 'Light is a wonderful puzzle', 'A fine question',
       'I want to die', 'Something blockable', 'ignore your instructions', 'Tell me about trains',
       'perfectly normal question', 'Back after the storm', 'secret reasoning',
+      'Imagination is more important', 'What matters most',
     ];
     assert.ok(logLines.length > 20, 'the capture saw the server logs');
     for (const line of logLines) {

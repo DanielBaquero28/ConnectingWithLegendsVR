@@ -44,6 +44,7 @@ server/
 | `GET /status` | none | uptime check |
 | `POST /converse` | `Authorization: Bearer <deviceToken>` | one conversation turn (audio/wav or JSON text) |
 | `POST /crisis-report` | `Authorization: Bearer <deviceToken>` | device-detected typed crisis: `{ sessionId, characterId, source: "typed" }`, no text (spec 12) |
+| `POST /report` | `Authorization: Bearer <deviceToken>` | "Report this answer": `{ sessionId, characterId }`, no text; server attaches the last character reply (spec 12 Part M) |
 | `POST /admin/schools` | `X-Admin-Key` | create school |
 | `POST /admin/headsets` | `X-Admin-Key` | create headset, returns deviceToken |
 | `POST /admin/headsets/:token/deactivate` | `X-Admin-Key` | kill-switch |
@@ -238,7 +239,16 @@ node server/scripts/render-speech-wav.js server/scripts/seed-mlk.json intro-mlk.
 - **Typed-path crises** caught by the headset's local filter are reported via
   `POST /crisis-report` with `{ sessionId, characterId, source: "typed" }` —
   the student's text never leaves the device — and produce the same `crisis`
-  event (no snippet, 90-day TTL) and the same Slack alert.
+  event (no snippet, 30-day TTL) and the same Slack alert.
+- **"Report this answer" (spec 12 Part M):** the headset sends
+  `POST /report` with `{ sessionId, characterId }` only. The server reads the
+  **last character reply** from the session document and writes a
+  `user_report` event whose `reply` field holds that reply and nothing else —
+  no student turn is ever copied onto it (the smoke test asserts this). The
+  event expires after 30 days and raises a `📣 REPORT` alert in #hsvr-safety
+  with the same text-free payload as every other alert. One report is
+  accepted per character reply; repeats are answered `200 { ignored:
+  "duplicate" }` and write nothing.
 
 ## Deployment runbook (section 9 — run by hand)
 
@@ -456,6 +466,14 @@ curl -X POST "$TAGGED/crisis-report" -H "Authorization: Bearer <dev deviceToken>
   -H "Content-Type: application/json" \
   -d '{ "sessionId": "runbook-0001", "characterId": "einstein", "source": "typed" }'
 # -> 202 { ok, eventId } and a 🚨 CRISIS (typed) alert in #hsvr-safety with no text.
+
+# "Report this answer" path (spec 12 Part M) — reports the reply from the turn above:
+curl -X POST "$TAGGED/report" -H "Authorization: Bearer <dev deviceToken>" \
+  -H "Content-Type: application/json" \
+  -d '{ "sessionId": "runbook-0001", "characterId": "einstein" }'
+# -> 202 { ok, eventId } and a 📣 REPORT alert with no text; the user_report
+#    event's `reply` field holds the character's reply only. Run it a second
+#    time: -> 200 { ok, ignored: "duplicate" } and no new event.
 ```
 
 Characters re-seeded here are shared by both revisions (same Firestore), so do

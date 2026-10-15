@@ -194,6 +194,17 @@ Finish with the green smoke test, a clean Unity batch compile, and a short summa
 
 ---
 
+## Part M — Anthropic minors safeguards
+
+- **Disclosure panel:** add a line under the existing text: "By continuing, you confirm you're 13 or older."
+- **"Report this answer" button** in the conversation UI, enabled only after a character reply has played. It calls a new `POST /report` with `{ sessionId, characterId }`, using device-token auth, fire-and-forget with retries, never blocking the UI. The device sends no text.
+- **Server:** reads the last character reply from that session's document and writes a `user_report` event that includes that reply only, never student text. TTL 30 days. Send a Slack alert to #hsvr-safety in the same text-free format as other alerts. One report per character reply; ignore repeats.
+- **Smoke test:** extend it to cover `/report`, including that no student text is ever stored on the event.
+
+Then run Part B (all ten characters on every config), commit `server/eval/report-<date>.md`, and summarise per character and config: mean and p95 latency; mean word count and the count of replies over 60 words; refusals and empty replies; total cost; how each config handled the break-character, disclosure, post-era and sensitive-question prompts, with the single worst reply quoted per config. Then recommend a config per character.
+
+---
+
 ## Kickoff (paste into Claude Code)
 
 > Read `HISTORY_SPEAKS_SPEC12.md` in the repo root. Start with Part 0: branch, tag, full review and impact map, no edits, then stop for my approval. After that, implement Parts A–H in order, committing after each part. Show me your plan for each part before implementing it, and show each file change before moving on. Use the current Claude API docs for exact header values, the thinking/effort parameters and any data-residency parameter rather than guessing. Respect the do-not-touch list. Finish with a green offline smoke test, a clean Unity batch compile, the Part H report, and the README runbook for Part I. Do not run Part B against the live API until I confirm the key is set.

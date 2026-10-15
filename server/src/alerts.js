@@ -78,6 +78,22 @@ function alertCrisis({ schoolName, headsetLabel, characterId, eventId, source })
   }
 }
 
+// 📣 REPORT — a student pressed "Report this answer" (spec 12 Part M). Same
+// text-free payload as the crisis alert; the reported reply lives on the
+// user_report event, which staff open by the event ID. Not throttled: the
+// server already accepts at most one report per character reply.
+function alertUserReport({ schoolName, headsetLabel, characterId, eventId }) {
+  try {
+    send(
+      'SLACK_WEBHOOK_SAFETY',
+      `📣 REPORT — school: ${schoolName} — headset: ${headsetLabel} — ` +
+        `character: ${characterId || 'n/a'} — event: ${eventId || 'n/a'}\n${stamp()}`
+    );
+  } catch (err) {
+    log.error('alerts.user_report_failed', { error: String(err.message || err).slice(0, 200) });
+  }
+}
+
 // ⚠️ PATTERN — one headset accruing ≥5 profanity/jailbreak events in 30 min.
 // Individual teenage one-offs do NOT alert; only patterns.
 async function feedPattern({ headsetId, schoolName, headsetLabel }) {
@@ -134,4 +150,4 @@ async function feedServerError() {
   }
 }
 
-module.exports = { alertCrisis, feedPattern, alertBudget, feedProviderError, feedServerError };
+module.exports = { alertCrisis, alertUserReport, feedPattern, alertBudget, feedProviderError, feedServerError };

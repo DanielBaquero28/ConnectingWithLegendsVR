@@ -24,6 +24,10 @@ app.use('/converse', require('./converse').router);
 // Device-reported typed-path crisis (spec 12 Part G): metadata only, no text.
 app.use('/crisis-report', require('./crisisReport').router);
 
+// "Report this answer" (spec 12 Part M): metadata only, the server attaches
+// the last character reply itself.
+app.use('/report', require('./report').router);
+
 // Provisioning/inspection endpoints behind X-Admin-Key (spec 4.6).
 app.use('/admin', require('./admin').router);
 
