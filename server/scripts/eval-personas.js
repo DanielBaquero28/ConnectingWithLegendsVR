@@ -7,6 +7,7 @@
 //   --configs haiku-5-5@low,...   subset of CONFIGS below (default: all)
 //   --concurrency 4               characters evaluated in parallel (default 4)
 //   --out <path>                  report path (default server/eval/report-<YYYY-MM-DD>.md)
+//   --rows-json <path>            also dump the raw per-call rows as JSON (for ad-hoc analysis)
 //   --dry-run                     print the plan, make no API calls
 //
 // Reads the seed files directly (no Firestore, no proxy). Requests are built by
@@ -112,7 +113,7 @@ const TIMEOUT_MS = 60000;
 
 // ===== CLI =====
 function parseArgs(argv) {
-  const args = { characters: null, configs: null, concurrency: 4, out: null, dryRun: false };
+  const args = { characters: null, configs: null, concurrency: 4, out: null, rowsJson: null, dryRun: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i];
@@ -120,6 +121,7 @@ function parseArgs(argv) {
     else if (a === '--configs') args.configs = next().split(',').map((s) => s.trim()).filter(Boolean);
     else if (a === '--concurrency') args.concurrency = Math.max(1, Number(next()) || 1);
     else if (a === '--out') args.out = next();
+    else if (a === '--rows-json') args.rowsJson = next();
     else if (a === '--dry-run') args.dryRun = true;
     else if (a === '--help' || a === '-h') { usage(); process.exit(0); }
     else { console.error('Unknown argument: ' + a); usage(); process.exit(2); }
@@ -393,6 +395,7 @@ async function main() {
   const report = renderReport({ date, characters, configNames, rows, geo });
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, report, 'utf8');
+  if (args.rowsJson) fs.writeFileSync(args.rowsJson, JSON.stringify(rows, null, 1), 'utf8');
   const errors = rows.filter((r) => r.error).length;
   console.error(`\nDone in ${Math.round((Date.now() - t0) / 1000)}s: ${rows.length} calls, ${errors} errors. Report: ${outPath}`);
   if (errors) process.exit(3);
