@@ -128,10 +128,11 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
   if (flag === 'profanity' || flag === 'jailbreak') {
     // Non-blocking: the persona handles these in character. Log + feed the
     // per-headset pattern counter (one-offs never alert, patterns do).
+    // Spec 12 Part K: metadata only — no snippet.
     await events.logEvent({
       type: flag, severity: 'info',
       schoolId: device.schoolId, headsetId: device.headsetId, sessionId,
-      snippet: userText,
+      detail: { characterId },
     });
     await alerts.feedPattern({
       headsetId: device.headsetId, schoolName: school.schoolName, headsetLabel: device.label,
@@ -182,10 +183,11 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
   if (result.safetyBlocked) {
     // Model refusal (stop_reason "refusal") -> in-character redirect; the user
     // turn is NOT stored (spec 4.4 step 6). Same message, same event as before.
+    // Spec 12 Part K: metadata only — no snippet.
     await events.logEvent({
       type: 'safety_block', severity: 'warning',
       schoolId: device.schoolId, headsetId: device.headsetId, sessionId,
-      snippet: userText,
+      detail: { characterId, stopReason: result.stopReason },
     });
     const tts = await googleTts.synthesize(safety.SAFETY_REDIRECT, character.voice);
     return res.json({

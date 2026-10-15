@@ -603,7 +603,7 @@ async function main() {
     assert.equal(ev.headsetId, headsetId);
     assert.deepEqual(ev.detail, { source: 'typed', characterId: 'einstein' });
     const ttlDays = Math.round((ev.expiresAt - ev.createdAt) / 86400000);
-    assert.equal(ttlDays, 90, 'safety retention');
+    assert.equal(ttlDays, 30, 'spec 12 Part K: every event type expires after 30 days');
 
     await flush();
     const posts = slackPosts.filter((p) => p.channel === 'safety' && p.text.includes('🚨 CRISIS'));
@@ -639,7 +639,8 @@ async function main() {
       assert.equal(fakeDb.docs.get(`sessions/${sid}`).turns.length, before);
       const blocks = [...fakeDb.docs.values()].filter((d) => d.type === 'safety_block');
       assert.equal(blocks.length, 1);
-      assert.equal(blocks[0].snippet, 'Something blockable');
+      assert.equal(blocks[0].snippet, undefined, 'spec 12 Part K: safety_block carries no snippet');
+      assert.deepEqual(blocks[0].detail, { characterId: 'einstein', stopReason: 'refusal' });
     } finally {
       resetAnthropic();
     }
@@ -741,6 +742,40 @@ async function main() {
     anthropicRequests = [];
     await postJson('/converse', auth, { sessionId: sid, text: 'Hello again' });
     assert.ok(anthropicRequests[0].body.system.endsWith(p));
+  });
+
+  // --- spec 12 Part K: data minimisation ---
+  await test('only server-detected crisis events carry a snippet; everything expires in 30 days', async () => {
+    const all = [...fakeDb.docs.entries()].filter(([p]) => p.startsWith('events/')).map(([, d]) => d);
+    assert.ok(all.length > 5);
+    for (const ev of all) {
+      const ttlDays = Math.round((ev.expiresAt - ev.createdAt) / 86400000);
+      assert.equal(ttlDays, 30, `${ev.type} retention`);
+      if (ev.type === 'crisis' && ev.detail && ev.detail.source === 'server') {
+        assert.equal(typeof ev.snippet, 'string', 'server-detected crisis keeps its snippet');
+      } else {
+        assert.equal(ev.snippet, undefined, `${ev.type} must not carry a snippet`);
+      }
+    }
+    // A profanity turn logs an event with metadata only.
+    const res = await postJson('/converse', auth, { sessionId: sid, text: 'This is shit, honestly' });
+    assert.equal(res.status, 200);
+    const prof = [...fakeDb.docs.values()].filter((d) => d.type === 'profanity');
+    assert.equal(prof.length, 1);
+    assert.equal(prof[0].snippet, undefined);
+    assert.deepEqual(prof[0].detail, { characterId: 'einstein' });
+    // Belt and braces: the events module itself drops a snippet on non-crisis types.
+    const events = require('../src/events');
+    const id = await events.logEvent({ type: 'safety_block', severity: 'warning', schoolId, headsetId, sessionId: sid, snippet: 'should be dropped' });
+    assert.equal(fakeDb.docs.get(`events/${id}`).snippet, undefined);
+    assert.ok(!JSON.stringify(fakeDb.docs.get(`events/${id}`)).includes('should be dropped'));
+  });
+
+  await test('SAFETY_PREAMBLE forbids asking for personal information', async () => {
+    const p = safety.SAFETY_PREAMBLE;
+    assert.ok(/Never ask for or encourage a student to share personal information/.test(p));
+    assert.ok(/full name, school, address, phone number, email, or social media/.test(p));
+    assert.ok(/do not repeat them; simply steer back to the topic/.test(p));
   });
 
   // --- jailbreak pattern alert ---

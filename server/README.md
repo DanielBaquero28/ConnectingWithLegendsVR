@@ -207,11 +207,11 @@ node server/scripts/render-speech-wav.js server/scripts/seed-mlk.json intro-mlk.
 - **Full conversation text lives only in the `sessions` collection**, solely
   for conversation continuity, and **expires after 24 hours** (Firestore TTL
   on `expiresAt`, refreshed per turn; only the last 16 messages are kept).
-- **`events` snippets:** the only conversation text that lands in the
-  `events` collection is the flagged snippet on `crisis`, `profanity`,
-  `jailbreak`, and `safety_block` events. Safety events expire after
-  **90 days**; ops events (e.g. `turn_ok`, which is metadata-only — durations
-  and costs, zero conversation text) after **30 days**.
+- **`events` snippets (spec 12 Part K):** the only conversation text that
+  lands in the `events` collection is the flagged snippet (≤300 chars) on a
+  **server-detected `crisis`** event. `profanity`, `jailbreak`, `safety_block`,
+  typed-crisis reports and every ops event (`turn_ok`, `provider_error`,
+  `llm_empty`) are metadata-only. **Every event expires after 30 days.**
 - **No student PII anywhere.** There are no student accounts or names.
   Device tokens identify headsets, not people; schools are identified by a
   name Daniel assigns.
@@ -482,7 +482,29 @@ gcloud services disable generativelanguage.googleapis.com --project "$PROJECT_ID
 # Console → APIs & Services → Credentials: delete "HS - Gemini API Key".
 ```
 
-### 7. Housekeeping
+### 7. Stop retaining client IP addresses (spec 12 Part K)
+
+Cloud Run writes a platform request log (`run.googleapis.com/requests`) for
+every call, and its `httpRequest` block carries the headset's public IP. Our
+code never reads it, but the `_Default` log bucket keeps it for 30 days. Add
+an exclusion on the `_Default` sink so those entries are dropped before they
+are stored (syntax from the current `gcloud logging sinks update` reference:
+`--add-exclusion=[description=…],[disabled=…],[filter=…],[name=…]`):
+
+```bash
+gcloud logging sinks update _Default --project "$PROJECT_ID" \
+  --add-exclusion="name=drop-hsvr-proxy-request-logs,description=Spec 12 Part K: do not retain Cloud Run request logs (client IPs) for hsvr-proxy,filter=logName=\"projects/$PROJECT_ID/logs/run.googleapis.com%2Frequests\" AND resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"hsvr-proxy\""
+
+# Verify:
+gcloud logging sinks describe _Default --project "$PROJECT_ID" --format="yaml(exclusions)"
+```
+
+Only the platform request log is excluded. Our own structured stdout logs
+(`run.googleapis.com/stdout`) are unaffected, and they carry no IPs and no
+conversation text. Error Reporting and the 🟥 5xx alert are driven by our own
+logs and the error handler, not by the request log.
+
+### 8. Housekeeping
 
 - Merge `spec12-claude-migration` into `develop` (never directly into `main`).
 - Re-render the intro WAV for any recast character

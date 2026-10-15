@@ -1,13 +1,16 @@
-// Event logging (spec 4.3 events/{autoId}, 4.8 retention).
-// Flagged snippets (crisis/profanity/jailbreak/safety_block) are the ONLY
-// student text that ever lands here; turn_ok events are metadata-only.
-// Retention via Firestore TTL on expiresAt: safety events 90 days, ops 30.
+// Event logging (spec 4.3 events/{autoId}, 4.8 retention; spec 12 Part K
+// data minimisation).
+// The snippet on a server-detected `crisis` event is the ONLY student text
+// that ever lands here — profanity, jailbreak and safety_block events are
+// metadata-only, as are turn_ok and the ops events. Every event expires after
+// 30 days via the Firestore TTL on expiresAt.
 
 const { getDb } = require('./db');
 const log = require('./log');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const SAFETY_EVENT_TYPES = new Set(['crisis', 'profanity', 'jailbreak', 'safety_block']);
+const RETENTION_DAYS = 30;
+const SNIPPET_EVENT_TYPES = new Set(['crisis']);
 const MAX_SNIPPET_CHARS = 300;
 
 // Never throws — an event-write failure must not take down the request path.
@@ -16,7 +19,7 @@ const MAX_SNIPPET_CHARS = 300;
 async function logEvent({ type, severity, schoolId, headsetId, sessionId, snippet, detail }) {
   try {
     const now = new Date();
-    const retentionDays = SAFETY_EVENT_TYPES.has(type) ? 90 : 30;
+    const retentionDays = RETENTION_DAYS;
     const doc = {
       type,
       severity,
@@ -26,7 +29,9 @@ async function logEvent({ type, severity, schoolId, headsetId, sessionId, snippe
       createdAt: now,
       expiresAt: new Date(now.getTime() + retentionDays * DAY_MS),
     };
-    if (snippet) doc.snippet = String(snippet).slice(0, MAX_SNIPPET_CHARS);
+    // Spec 12 Part K: a snippet is stored on crisis events only; any snippet
+    // passed for another type is dropped here, not just at the call sites.
+    if (snippet && SNIPPET_EVENT_TYPES.has(type)) doc.snippet = String(snippet).slice(0, MAX_SNIPPET_CHARS);
     if (detail) doc.detail = detail;
     const ref = await getDb().collection('events').add(doc);
     return ref.id;
