@@ -226,3 +226,18 @@ Decision on Part B: use `haiku-5-5` with thinking disabled for all ten character
 7. **Re-run Part B** for `haiku-5-5@no-thinking` only, all ten characters. Report: mean and p95 latency; mean words, the count over 40 and over 50 words, and any truncated replies; any meta leaks; the Tubman post-era answer quoted; any reply considered a failure.
 
 Also confirm in writing: (a) the currently installed Quest APK keeps working against the new server for `/converse`, so a server-only cutover can't break headsets in the field; (b) the runbook's deploy step sets `ALLOW_GENERATIVE_TTS=true` for now. Keep the Chirp voices for MLK, Lincoln and Caesar until counsel answers. Don't deploy.
+
+---
+
+## Part O — Length and persona fixes
+
+- Count the words in every few-shot assistant reply in all ten seeds. Rewrite any over 35 words down to 35 or fewer, keeping the voice and the closing question.
+- Append the limit to the current user turn in the request builder: after the student's text, add "(Reply in at most 40 words, in two or three sentences, ending with a short question when natural.)". Do it in the request only; never store it in session history.
+- SAFETY_PREAMBLE: "Always speak in the first person as yourself; never refer to yourself by name in the third person." Also: "Repeat only well-documented history; if a famous story is disputed or a myth, say so or don't tell it."
+- Lincoln seed: add a short "common myths" line (for example, the Gettysburg Address was not written on the back of an envelope on the train). Add one or two equivalent myth lines to any other seed where a well-known myth exists.
+- Re-run `haiku-5-5@no-thinking`, all ten characters. Report the same metrics as last time, plus how many sentence-cuts dropped a closing question.
+
+Acceptance: at most 5 of 70 replies over 50 words raw, zero meta leaks, zero identifiable factual failures. If the re-run passes, commit and report it passed. If not, show the numbers and stop.
+
+If it passes, start the cutover: execute the README runbook one step at a time, showing each command before running it and waiting for an OK. Never print secret values. Stop before switching traffic so the tagged revision's smoke results can be reviewed.
+

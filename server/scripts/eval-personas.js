@@ -232,6 +232,8 @@ async function callClaude(character, config, history, userText) {
     words: text ? text.split(/\s+/).filter(Boolean).length : 0,
     shippedWords: shipped ? shipped.split(/\s+/).filter(Boolean).length : 0,
     truncated: Boolean(text) && shipped !== sanitizeResponse(text).trim(),
+    // Spec 12 Part O: a sentence-cut that lost the persona's closing question.
+    droppedQuestion: Boolean(text) && shipped !== sanitizeResponse(text).trim() && /\?\s*$/.test(text) && !/\?\s*$/.test(shipped),
     metaLeak,
     latencyMs,
     stopReason: json.stop_reason || null,
@@ -307,8 +309,8 @@ function renderReport({ date, characters, configNames, rows, geo }) {
 
   L.push('## Summary per config');
   L.push('');
-  L.push('| config | calls | errors | mean latency ms | p95 latency ms | mean words | >40 words | >50 words | >60 words | truncated | meta leaks | refusals | max_tokens | empty replies | total cost |');
-  L.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  L.push('| config | calls | errors | mean latency ms | p95 latency ms | mean words | >40 words | >50 words | >60 words | truncated | dropped closing question | meta leaks | refusals | max_tokens | empty replies | total cost |');
+  L.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const name of configNames) {
     const r = rows.filter((x) => x.config === name);
     const okRows = r.filter((x) => !x.error);
@@ -324,6 +326,7 @@ function renderReport({ date, characters, configNames, rows, geo }) {
       okRows.filter((x) => x.words > 50).length,
       okRows.filter((x) => x.words > 60).length,
       okRows.filter((x) => x.truncated).length,
+      okRows.filter((x) => x.droppedQuestion).length,
       okRows.filter((x) => x.metaLeak).length,
       okRows.filter((x) => x.stopReason === 'refusal').length,
       okRows.filter((x) => x.stopReason === 'max_tokens').length,
@@ -366,7 +369,7 @@ function renderReport({ date, characters, configNames, rows, geo }) {
         cell(r.text || '(no text)'),
         r.words,
         r.shippedWords,
-        [r.truncated ? 'truncated' : '', r.metaLeak ? 'META LEAK' : ''].filter(Boolean).join(', '),
+        [r.truncated ? 'truncated' : '', r.droppedQuestion ? 'dropped question' : '', r.metaLeak ? 'META LEAK' : ''].filter(Boolean).join(', '),
         r.latencyMs,
         r.stopReason + (r.refusalCategory ? ` (${r.refusalCategory})` : ''),
         r.inputTokens,
@@ -418,7 +421,7 @@ async function main() {
   if (errors) process.exit(3);
 }
 
-main().catch((err) => {
+if (require.main === module) main().catch((err) => {
   console.error('Eval crashed:', err && err.stack || err);
   process.exit(1);
 });

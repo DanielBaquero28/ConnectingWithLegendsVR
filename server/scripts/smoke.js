@@ -300,6 +300,12 @@ async function main() {
       assert.equal(seed.modelName, 'claude-haiku-5-5', `${file} modelName`);
       assert.equal(seed.effort, 'low', `${file} effort`);
       assert.equal(seed.thinking, 'disabled', `${file} thinking (spec 12 Part N)`);
+      // Spec 12 Part O: few-shot replies model the length rule (<= 35 words).
+      for (const ex of seed.fewShotExamples) {
+        const n = ex.characterReplies.split(/\s+/).filter(Boolean).length;
+        assert.ok(n <= 35, `${file} few-shot reply has ${n} words (max 35)`);
+      }
+      assert.ok(/Common myths to avoid/.test(seed.systemPersona), `${file} carries a myths line`);
       const id = file.slice('seed-'.length, -'.json'.length);
       const res = await realFetch(`${base}/admin/characters/${id}`, { method: 'PUT', headers: admin, body: raw });
       if (/chirp/i.test(seed.voice.voiceName)) {
@@ -436,7 +442,9 @@ async function main() {
     assert.equal(body.messages[1].role, 'assistant');
     assert.equal(body.messages[1].content, seed.fewShotExamples[0].characterReplies);
     const last = body.messages[body.messages.length - 1];
-    assert.deepEqual(last, { role: 'user', content: 'What is light?' });
+    // Spec 12 Part O: the length rule rides on the current user turn only.
+    assert.deepEqual(last, { role: 'user', content: 'What is light?' + claude.TURN_SUFFIX });
+    assert.ok(/at most 40 words/.test(claude.TURN_SUFFIX));
     for (let i = 1; i < body.messages.length; i++) {
       assert.notEqual(body.messages[i].role, body.messages[i - 1].role, 'strict alternation');
     }
@@ -450,9 +458,11 @@ async function main() {
     const { messages } = anthropicRequests[0].body;
     const n = messages.length;
     // ...few-shots, [user: What is light?], [assistant: reply], [user: And what is time?]
-    assert.deepEqual(messages[n - 3], { role: 'user', content: 'What is light?' });
+    assert.deepEqual(messages[n - 3], { role: 'user', content: 'What is light?' }, 'history turns carry no length suffix');
     assert.deepEqual(messages[n - 2], { role: 'assistant', content: 'Light is a wonderful puzzle.' });
-    assert.deepEqual(messages[n - 1], { role: 'user', content: 'And what is time?' });
+    assert.deepEqual(messages[n - 1], { role: 'user', content: 'And what is time?' + claude.TURN_SUFFIX });
+    const stored = fakeDb.docs.get(`sessions/${sid}`);
+    assert.ok(!JSON.stringify(stored).includes('at most 40 words'), 'the suffix is never stored in session history');
     for (const m of messages) assert.equal(typeof m.content, 'string', 'history is plain text');
     assert.ok(!JSON.stringify(messages).includes('"role":"model"'), 'stored "model" role is mapped to assistant');
   });
@@ -483,7 +493,7 @@ async function main() {
     assert.ok(messages[n - 4].role === 'assistant' && messages[n - 4].content.endsWith('\n\nOrphaned assistant line.'));
     assert.equal(messages[n - 3].content, 'First half.\n\nSecond half.');
     assert.equal(messages[n - 2].content, 'One answer.\n\nAnother answer.');
-    assert.deepEqual(messages[n - 1], { role: 'user', content: 'Now a question.' });
+    assert.deepEqual(messages[n - 1], { role: 'user', content: 'Now a question.' + claude.TURN_SUFFIX });
 
     // With no few-shots the orphan WOULD be leading, and is dropped.
     const body = claude.buildRequestBody(
@@ -491,7 +501,7 @@ async function main() {
       [{ role: 'model', text: 'Orphan' }, { role: 'user', text: 'Q1' }, { role: 'model', text: 'A1' }],
       'Q2');
     assert.deepEqual(body.messages, [
-      { role: 'user', content: 'Q1' }, { role: 'assistant', content: 'A1' }, { role: 'user', content: 'Q2' },
+      { role: 'user', content: 'Q1' }, { role: 'assistant', content: 'A1' }, { role: 'user', content: 'Q2' + claude.TURN_SUFFIX },
     ]);
     assert.equal(body.system, 'P\n\nC\n\n' + safety.SAFETY_PREAMBLE);
   });
@@ -1022,6 +1032,8 @@ async function main() {
     assert.ok(/then continue in character/.test(p));
     assert.ok(/Answer in two or three short sentences, never more than 40 words/.test(p), 'spec 12 Part N length rule');
     assert.ok(/nothing that happened after your death or your knowledge cutoff/.test(p), 'spec 12 Part N era rule');
+    assert.ok(/never refer to yourself by name in the third person/.test(p), 'spec 12 Part O first-person rule');
+    assert.ok(/if a famous story is disputed or a myth, say so or do not tell it/.test(p), 'spec 12 Part O myth rule');
     assert.ok(/honors, memorials, films, currency, or anything named after you/.test(p));
     anthropicRequests = [];
     await postJson('/converse', auth, { sessionId: sid, text: 'Hello again' });

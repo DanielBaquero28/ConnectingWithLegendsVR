@@ -44,6 +44,14 @@ const INFERENCE_GEO_VALUES = ['us', 'global'];
 
 const MAX_TOKENS = 600; // thinking tokens count against this too
 
+// Spec 12 Part O: the length rule travels with the CURRENT user turn, where
+// Haiku obeys it, instead of only in the system prompt, where it did not
+// (Part N re-run: 49/70 replies over 40 words). Appended in the request body
+// only — sessions.js stores the student's text as sent, never this suffix,
+// so history turns resent on later requests do not carry it.
+const TURN_SUFFIX =
+  ' (Reply in at most 40 words, in two or three sentences, ending with a short question when natural.)';
+
 const MAX_ATTEMPTS = 3;
 const ATTEMPT_TIMEOUT_MS = 15000;
 const OVERALL_DEADLINE_MS = 12000; // across all attempts; device gives up at 15s
@@ -116,12 +124,13 @@ function buildRequestBody(character, historyTurns, userText) {
     raw.push({ role: turn.role, text: turn.text });
   }
 
-  raw.push({ role: 'user', text: userText });
+  const currentTurn = userText + TURN_SUFFIX;
+  raw.push({ role: 'user', text: currentTurn });
 
   const messages = normalizeMessages(raw);
   // normalizeMessages merges into the final user turn, never past it.
   if (messages.length === 0 || messages[messages.length - 1].role !== 'user') {
-    messages.push({ role: 'user', content: userText });
+    messages.push({ role: 'user', content: currentTurn });
   }
 
   return {
@@ -298,4 +307,5 @@ module.exports = {
   DEFAULT_THINKING,
   EFFORT_REQUIRING_THINKING,
   MAX_TOKENS,
+  TURN_SUFFIX,
 };

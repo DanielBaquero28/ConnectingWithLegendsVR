@@ -99,7 +99,7 @@ with `x-api-key: $ANTHROPIC_API_KEY` and `anthropic-version: 2023-06-01`.
 | `output_config.effort` | the character's `effort` (default `low`; `low`/`medium`/`high`/`xhigh`/`max`). Still sent with thinking disabled — per the docs effort "works whether or not thinking is enabled". `xhigh`/`max` need `"adaptive"` (Haiku 5.5 returns 400 otherwise); the PUT rejects that combination. |
 | `inference_geo` | `CLAUDE_INFERENCE_GEO` env, default `us` (data residency; billed 1.1x) |
 | `system` | persona + knowledge-cutoff note + `SAFETY_PREAMBLE` |
-| `messages` | few-shots as user/assistant pairs, windowed text-only history, current user turn |
+| `messages` | few-shots as user/assistant pairs, windowed text-only history, current user turn **plus the length suffix** (spec 12 Part O: "(Reply in at most 40 words, in two or three sentences, ending with a short question when natural.)", appended in the request only — sessions store the student's text as sent) |
 
 No `temperature`/`top_p`/`top_k` are sent (Haiku 5.5 rejects non-defaults).
 Thinking blocks are never stored or resent: only text blocks become the reply,
@@ -141,6 +141,11 @@ with `xhigh`/`max` effort, so a bad seed fails at seed time.
   keeps it at or under 50 words** (`maxWords + 10`). Only when there is no
   sentence boundary inside that allowance is it cut at exactly 50 words,
   with no ellipsis. Replies are never cut mid-sentence otherwise.
+- **Few-shots and myths (spec 12 Part O).** Every few-shot reply in the
+  seeds is 35 words or fewer (the smoke test checks), and every
+  `systemPersona` ends with a "Common myths to avoid" line. The preamble
+  adds: speak in the first person, never about yourself by name in the third
+  person; repeat only well-documented history and flag disputed stories.
 - **Era discipline.** The preamble also states that the character knows
   nothing after their death or knowledge cutoff, including honors, memorials,
   films, currency or anything named after them, and steers back to their own
