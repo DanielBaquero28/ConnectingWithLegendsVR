@@ -111,8 +111,21 @@ device shows its in-character network line.
 
 Retries: 3 attempts, 15 s per attempt, 0.5 s / 1.5 s backoff, on network
 errors, 429, 5xx and 529, honouring `retry-after` — under an **overall 12 s
-deadline** across all attempts, so the server stops (and stops billing) before
-the headset's 15 s timeout.
+deadline** across all attempts.
+
+### Turn deadline (spec 12 Part L)
+
+Every `/converse` request has one **20 s deadline covering STT, the LLM and
+TTS**. Each provider call's timeout is capped to the time left; once the
+deadline passes, remaining work is skipped and the device gets **504
+`{ error: "Request timed out" }`** — no event is written, nothing is stored in
+the session, nothing is metered and no alert fires (only a
+`converse.deadline_exceeded` log line with the stage). The headset's request
+timeout is 25 s, above the server's deadline, and the headset **never resends**
+a turn after a timeout or a 504: it shows the in-character network line.
+
+Turns that end in a model refusal or in `llm_empty` are metered (tokens and
+STT seconds) even though no reply shipped — Claude bills them.
 
 `PUT /admin/characters/:id` rejects a `modelName` that is not in the price map
 in `src/metering.js` and an `effort` outside the documented values, so a bad

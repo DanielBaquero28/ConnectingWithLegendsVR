@@ -150,20 +150,27 @@ function isRetryableStatus(status) {
 //                inputTokens, outputTokens, inferenceGeo, stopReason }
 //   { ok: true,  safetyBlocked: true, ... }   -> caller sends the in-character redirect (stop_reason refusal)
 //   { ok: true,  empty: true, ... }           -> no text (e.g. max_tokens spent on thinking); caller 502s + llm_empty
-//   { ok: false }                             -> retries/deadline exhausted or non-retryable error (caller 502s)
-async function generateReply(character, historyTurns, userText) {
+//   { ok: false, timedOut?: true }            -> retries/deadline exhausted or non-retryable error (caller 502s,
+//                                                or 504s when the request-level deadline was the cause)
+//
+// options.deadlineAt (ms epoch, spec 12 Part L): the /converse request's own
+// 20s deadline. The provider never works past min(own 12s deadline, deadlineAt).
+async function generateReply(character, historyTurns, userText, options) {
   const body = buildRequestBody(character, historyTurns, userText);
   const inputChars = countInputChars(body);
   const payload = JSON.stringify(body);
-  const deadline = Date.now() + OVERALL_DEADLINE_MS;
+  const requestDeadline = options && Number.isFinite(options.deadlineAt) ? options.deadlineAt : Infinity;
+  const deadline = Math.min(Date.now() + OVERALL_DEADLINE_MS, requestDeadline);
 
   let json = null;
   let requestId = null;
+  let timedOut = false;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
       log.error('claude.deadline_exceeded', { attempt: attempt + 1 });
+      timedOut = true;
       break;
     }
 
@@ -181,8 +188,13 @@ async function generateReply(character, historyTurns, userText) {
       });
     } catch (err) {
       // Network error or timeout — both retryable. No message text in the log.
+      // The per-attempt timeout is capped to the deadline, so a TimeoutError
+      // means the deadline (ours or the request's) is what stopped us.
+      if (err && (err.name === 'TimeoutError' || err.name === 'AbortError')) timedOut = true;
       log.error('claude.attempt_failed', { status: null, attempt: attempt + 1, request_id: null });
-      if (!(await waitForRetry(attempt, 0, deadline))) break;
+      const next = await waitForRetry(attempt, 0, deadline);
+      if (next.deadline) timedOut = true;
+      if (!next.retry) break;
       continue;
     }
 
@@ -193,7 +205,9 @@ async function generateReply(character, historyTurns, userText) {
         json = await res.json();
       } catch (err) {
         log.error('claude.attempt_failed', { status: res.status, attempt: attempt + 1, request_id: requestId });
-        if (!(await waitForRetry(attempt, 0, deadline))) break;
+        const next = await waitForRetry(attempt, 0, deadline);
+        if (next.deadline) timedOut = true;
+        if (!next.retry) break;
         continue;
       }
       break;
@@ -201,10 +215,12 @@ async function generateReply(character, historyTurns, userText) {
 
     log.error('claude.attempt_failed', { status: res.status, attempt: attempt + 1, request_id: requestId });
     if (!isRetryableStatus(res.status)) break;
-    if (!(await waitForRetry(attempt, retryAfterMs(res), deadline))) break;
+    const next = await waitForRetry(attempt, retryAfterMs(res), deadline);
+    if (next.deadline) timedOut = true;
+    if (!next.retry) break;
   }
 
-  if (!json) return { ok: false };
+  if (!json) return timedOut ? { ok: false, timedOut: true } : { ok: false };
 
   const usage = json.usage || {};
   const inputTokens = Number(usage.input_tokens) || 0;
@@ -238,16 +254,17 @@ async function generateReply(character, historyTurns, userText) {
 
 // Sleeps the backoff (or retry-after, whichever is longer) before the next
 // attempt, but only if there IS a next attempt and it would start before the
-// overall deadline. Returns false when the caller should stop retrying.
+// overall deadline. Returns { retry, deadline }: retry=false means stop;
+// deadline=true means the deadline (not the attempt count) is the reason.
 async function waitForRetry(attempt, retryAfter, deadline) {
-  if (attempt >= MAX_ATTEMPTS - 1) return false;
+  if (attempt >= MAX_ATTEMPTS - 1) return { retry: false, deadline: false };
   const delay = Math.max(BACKOFF_MS[attempt] || 0, retryAfter);
   if (Date.now() + delay >= deadline) {
     log.error('claude.deadline_exceeded', { attempt: attempt + 2 });
-    return false;
+    return { retry: false, deadline: true };
   }
   await sleep(delay);
-  return true;
+  return { retry: true, deadline: false };
 }
 
 function sleep(ms) {

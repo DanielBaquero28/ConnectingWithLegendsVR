@@ -28,8 +28,12 @@ function cacheKey(text, voice) {
 
 // Returns { audioBase64, cached } — audioBase64 is '' on failure so the reply
 // text still reaches the student (the request must not die because TTS did).
-async function synthesize(text, voice) {
+// options.deadlineAt (spec 12 Part L): the /converse request deadline; the
+// call's timeout is capped to the time left and `timedOut` is set when the
+// deadline — not the provider — ended the attempt.
+async function synthesize(text, voice, options) {
   if (!text) return { audioBase64: '', cached: false };
+  const deadlineAt = options && Number.isFinite(options.deadlineAt) ? options.deadlineAt : Infinity;
 
   // Spec 12 Part C: generative (Chirp) voices are blocked unless
   // ALLOW_GENERATIVE_TTS=true. Fail soft like any other TTS failure — the reply
@@ -52,6 +56,9 @@ async function synthesize(text, voice) {
   const prosody = supportsProsodyParams(voice.voiceName);
   log.debug('tts.request', { voiceName: voice.voiceName, prosodyParams: prosody });
 
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) return { audioBase64: '', cached: false, failed: true, timedOut: true };
+
   try {
     const res = await fetch(`${TTS_URL}`, {
       method: 'POST',
@@ -65,7 +72,7 @@ async function synthesize(text, voice) {
         voice: { languageCode: voice.languageCode, name: voice.voiceName },
         audioConfig: buildAudioConfig(voice),
       }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(Math.min(TIMEOUT_MS, remaining)),
     });
 
     if (!res.ok) {
@@ -88,8 +95,9 @@ async function synthesize(text, voice) {
     cache.set(key, audioBase64);
     return { audioBase64, cached: false };
   } catch (err) {
-    log.error('tts.failed', { error: String(err.message || err).slice(0, 200) });
-    return { audioBase64: '', cached: false, failed: true };
+    const timedOut = !!(err && (err.name === 'TimeoutError' || err.name === 'AbortError')) && Date.now() >= deadlineAt;
+    log.error('tts.failed', { error: String(err.message || err).slice(0, 200), timedOut });
+    return { audioBase64: '', cached: false, failed: true, timedOut };
   }
 }
 

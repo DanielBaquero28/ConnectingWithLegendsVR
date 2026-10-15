@@ -38,10 +38,13 @@ public class ProxyClient : MonoBehaviour
     // back to "einstein" (with a warning) when the scene is launched directly.
     private static string CharacterId => CharacterSession.CharacterId;
 
-    // Same retry shape as the old direct Gemini call: 3 attempts, 15s timeout,
-    // 0.5s/1.5s backoff, retry only on dropped connections / 5xx.
+    // 3 attempts, 0.5s/1.5s backoff, retry only on dropped connections / 5xx.
+    // Spec 12 Part L: the timeout is 25s — above the server's own 20s turn
+    // deadline — and a timed-out attempt (or a 504 from the server's deadline)
+    // is NEVER resent: the server already spent the turn, so re-sending would
+    // only bill it twice. The student sees the in-character network line.
     private const int MAX_ATTEMPTS = 3;
-    private const int TIMEOUT_SECONDS = 15;
+    private const int TIMEOUT_SECONDS = 25;
     private static readonly float[] BACKOFF = { 0.5f, 1.5f };
 
     [Serializable]
@@ -253,12 +256,21 @@ public class ProxyClient : MonoBehaviour
 
             // Retry only on a dropped connection or a 5xx server error.
             // 401 (bad/revoked token) and other 4xx fail immediately.
+            // Spec 12 Part L: a client-side timeout (Unity reports it as a
+            // ConnectionError whose error text is "Request timeout") and a 504
+            // (the server's own turn deadline) are never retried.
+            bool isTimeout = request.result == UnityWebRequest.Result.ConnectionError &&
+                             request.error != null &&
+                             request.error.IndexOf("timeout", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool isGatewayTimeout = request.responseCode == 504;
             bool isProtocol5xx = request.result == UnityWebRequest.Result.ProtocolError &&
-                                 request.responseCode >= 500 && request.responseCode <= 599;
-            bool isConnectionError = request.result == UnityWebRequest.Result.ConnectionError;
+                                 request.responseCode >= 500 && request.responseCode <= 599 &&
+                                 !isGatewayTimeout;
+            bool isConnectionError = request.result == UnityWebRequest.Result.ConnectionError && !isTimeout;
             bool retryable = isConnectionError || isProtocol5xx;
 
-            Debug.LogError($"[Proxy] Attempt {attempt + 1}/{MAX_ATTEMPTS} failed: {request.error} (HTTP {request.responseCode})");
+            Debug.LogError($"[Proxy] Attempt {attempt + 1}/{MAX_ATTEMPTS} failed: {request.error} (HTTP {request.responseCode})" +
+                           (isTimeout || isGatewayTimeout ? " — timed out, not retrying" : ""));
             request.Dispose();
 
             if (retryable && attempt < MAX_ATTEMPTS - 1)

@@ -171,7 +171,17 @@ global.fetch = async (url, opts) => {
   if (u === claude.ANTHROPIC_URL) {
     const body = JSON.parse(opts.body);
     anthropicRequests.push({ headers: opts.headers, body, signal: opts.signal });
-    return anthropicBehavior(body);
+    // Honour the abort signal like real fetch does, so deadline tests can hang.
+    const signal = opts.signal;
+    if (signal && signal.aborted) throw signal.reason || Object.assign(new Error('aborted'), { name: 'TimeoutError' });
+    return new Promise((resolve, reject) => {
+      const onAbort = () => reject(signal.reason || Object.assign(new Error('aborted'), { name: 'TimeoutError' }));
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
+      Promise.resolve(anthropicBehavior(body)).then((r) => {
+        if (signal) signal.removeEventListener('abort', onAbort);
+        resolve(r);
+      }, reject);
+    });
   }
   if (u.startsWith('http://127.0.0.1:')) {
     return realFetch(url, opts);
@@ -694,6 +704,72 @@ async function main() {
     } finally {
       resetAnthropic();
     }
+  });
+
+  // --- spec 12 Part L: request deadline + metering of non-reply turns ---
+  await test('the /converse deadline returns 504 with no events, no history write and no retry storm', async () => {
+    process.env.CONVERSE_DEADLINE_MS = '400';
+    let calls = 0;
+    // Hangs until aborted (the fetch stub honours the signal).
+    anthropicBehavior = () => { calls++; return new Promise(() => {}); };
+    try {
+      const docsBefore = fakeDb.docs.size;
+      const turnsBefore = fakeDb.docs.get(`sessions/${sid}`).turns.length;
+      const month = new Date().toISOString().slice(0, 7);
+      const usageBefore = structuredClone(fakeDb.docs.get(`usage/${schoolId}/months/${month}`));
+      slackPosts.length = 0;
+
+      const t0 = Date.now();
+      const res = await postJson('/converse', auth, { sessionId: sid, text: 'A slow question' });
+      const elapsed = Date.now() - t0;
+      assert.equal(res.status, 504);
+      assert.deepEqual(await res.json(), { error: 'Request timed out' });
+      assert.ok(elapsed < 3000, `returned promptly after the deadline (${elapsed}ms)`);
+      assert.equal(calls, 1, 'no further attempts after the deadline');
+
+      assert.equal(fakeDb.docs.size, docsBefore, 'no event of any kind was written');
+      assert.equal(fakeDb.docs.get(`sessions/${sid}`).turns.length, turnsBefore, 'no history write');
+      assert.deepEqual(fakeDb.docs.get(`usage/${schoolId}/months/${month}`), usageBefore, 'nothing metered');
+      await flush();
+      assert.equal(slackPosts.length, 0, 'no alert');
+    } finally {
+      delete process.env.CONVERSE_DEADLINE_MS;
+      resetAnthropic();
+    }
+  });
+
+  await test('refusal and llm_empty turns meter their tokens', async () => {
+    const month = new Date().toISOString().slice(0, 7);
+    const read = () => structuredClone(fakeDb.docs.get(`usage/${schoolId}/months/${month}`));
+    const before = read();
+
+    anthropicBehavior = () => anthropicResponse(200, {
+      id: 'msg_r', type: 'message', role: 'assistant', model: 'claude-haiku-5-5', content: [],
+      stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'general_harms' },
+      usage: { input_tokens: 700, output_tokens: 3, inference_geo: 'us' },
+    });
+    try {
+      assert.equal((await postJson('/converse', auth, { sessionId: sid, text: 'Refuse this please' })).status, 200);
+    } finally { resetAnthropic(); }
+    const afterRefusal = read();
+    assert.equal(afterRefusal.llmInputTokens - before.llmInputTokens, 700);
+    assert.equal(afterRefusal.llmOutputTokens - before.llmOutputTokens, 3);
+    assert.equal(afterRefusal.requestCount - before.requestCount, 1);
+    assert.ok(afterRefusal.totalCostUsd > before.totalCostUsd);
+
+    anthropicBehavior = () => anthropicResponse(200, {
+      id: 'msg_e', type: 'message', role: 'assistant', model: 'claude-haiku-5-5',
+      content: [{ type: 'thinking', thinking: 'x', signature: 's' }],
+      stop_reason: 'max_tokens', usage: { input_tokens: 650, output_tokens: 600, inference_geo: 'us' },
+    });
+    try {
+      assert.equal((await postJson('/converse', auth, { sessionId: sid, text: 'Empty this please' })).status, 502);
+    } finally { resetAnthropic(); }
+    const afterEmpty = read();
+    assert.equal(afterEmpty.llmInputTokens - afterRefusal.llmInputTokens, 650);
+    assert.equal(afterEmpty.llmOutputTokens - afterRefusal.llmOutputTokens, 600);
+    const expected = ((650 / 1e6) * 0.10 + (600 / 1e6) * 0.50) * 1.1;
+    assert.ok(Math.abs((afterEmpty.totalCostUsd - afterRefusal.totalCostUsd) - expected) < 1e-12);
   });
 
   await test('a non-retryable 4xx fails fast with a single attempt and a 502', async () => {

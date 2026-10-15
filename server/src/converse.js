@@ -25,8 +25,21 @@ const router = express.Router();
 // unreachable; matches the Einstein voice the device shipped with.
 const FALLBACK_VOICE = { languageCode: 'en-GB', voiceName: 'en-GB-Neural2-B', speakingRate: 0.72, pitch: -8.0 };
 
+// Spec 12 Part L: one deadline for the whole turn — STT + LLM + TTS. Each
+// provider call is capped to the time left, and once it has passed the
+// remaining work is skipped and the device gets a 504 (it shows its
+// in-character network line; nothing is stored, no safety event is written).
+// Env override exists for the smoke test only.
+const CONVERSE_DEADLINE_MS = 20000;
+function converseDeadlineMs() {
+  const v = Number(process.env.CONVERSE_DEADLINE_MS);
+  return Number.isFinite(v) && v > 0 ? v : CONVERSE_DEADLINE_MS;
+}
+
 router.post('/', deviceAuth, async (req, res, next) => {
   try {
+    const deadlineAt = Date.now() + converseDeadlineMs();
+
     // Budget gate (spec 4.4 step 2) — runs before STT. Never blocks a lesson;
     // past 100% it marks the usage doc overBudget and keeps serving.
     const school = await metering.gate(req.device.schoolId);
@@ -46,7 +59,10 @@ router.post('/', deviceAuth, async (req, res, next) => {
         return res.status(400).json({ error: 'Empty audio body' });
       }
 
-      const stt = await deepgram.transcribe(req.body);
+      const stt = await deepgram.transcribe(req.body, { deadlineAt });
+      if (!stt.ok && stt.timedOut) {
+        return timeout504(res, 'stt', deadlineAt);
+      }
       if (!stt.ok) {
         await events.logEvent({
           type: 'provider_error', severity: 'error',
@@ -67,6 +83,7 @@ router.post('/', deviceAuth, async (req, res, next) => {
         userText: stt.transcript,
         transcript: stt.transcript,
         sttSeconds: stt.audioSeconds,
+        deadlineAt,
       });
     }
 
@@ -81,6 +98,7 @@ router.post('/', deviceAuth, async (req, res, next) => {
         userText: text.trim(),
         transcript: text.trim(),
         sttSeconds: 0,
+        deadlineAt,
       });
     }
 
@@ -90,11 +108,39 @@ router.post('/', deviceAuth, async (req, res, next) => {
   }
 });
 
+// Spec 12 Part L: the turn ran out of time. No events, no history, no alerts —
+// just a structured log line (stage + elapsed, nothing else) and a 504 the
+// device turns into its in-character network line without retrying.
+function timeout504(res, stage, deadlineAt) {
+  log.warn('converse.deadline_exceeded', { stage, overshootMs: Date.now() - deadlineAt });
+  return res.status(504).json({ error: 'Request timed out' });
+}
+
+// Spec 12 Part L: refusal and llm_empty turns ship no reply but Claude still
+// bills their tokens (and STT already ran), so they are metered like any other
+// turn. Nothing is stored in the session for these turns.
+async function meterLlmOnly({ device, school, character, result, sttSeconds, ttsChars }) {
+  return metering.record({
+    schoolId: device.schoolId,
+    headsetId: device.headsetId,
+    monthlyBudgetUsd: school.monthlyBudgetUsd,
+    modelName: character.modelName,
+    inferenceGeo: result.inferenceGeo,
+    sttSeconds: sttSeconds || 0,
+    llmInputChars: result.inputChars || 0,
+    llmOutputChars: 0,
+    llmInputTokens: result.inputTokens || 0,
+    llmOutputTokens: result.outputTokens || 0,
+    ttsChars: ttsChars || 0,
+  });
+}
+
 // Shared pipeline for both input paths (after STT has produced userText).
-async function runPipeline(req, res, { sessionId, characterId, userText, transcript, sttSeconds }) {
+async function runPipeline(req, res, { sessionId, characterId, userText, transcript, sttSeconds, deadlineAt }) {
   const device = req.device;
   const school = req.school;
   const t0 = Date.now();
+  if (!Number.isFinite(deadlineAt)) deadlineAt = t0 + converseDeadlineMs();
 
   if (!sessions.isValidSessionId(sessionId)) {
     return res.status(400).json({ error: 'Missing or invalid sessionId' });
@@ -150,9 +196,14 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
   }
 
   // ===== LLM (spec 4.4 steps 5–6; spec 12: Claude Messages API + retry) =====
+  if (Date.now() >= deadlineAt) return timeout504(res, 'pre_llm', deadlineAt);
   const tLlm = Date.now();
-  const result = await claude.generateReply(character, session.turns, userText);
+  const result = await claude.generateReply(character, session.turns, userText, { deadlineAt });
   const llmMs = Date.now() - tLlm;
+
+  if (!result.ok && result.timedOut && Date.now() >= deadlineAt) {
+    return timeout504(res, 'llm', deadlineAt);
+  }
 
   if (!result.ok) {
     // All retries exhausted — the device shows its in-character network line.
@@ -177,6 +228,8 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
         stopReason: result.stopReason, outputTokens: result.outputTokens, llmMs,
       },
     });
+    // Spec 12 Part L: the tokens were billed even though nothing shipped.
+    await meterLlmOnly({ device, school, character, result, sttSeconds });
     return res.status(502).json({ error: 'Upstream model returned no text' });
   }
 
@@ -189,7 +242,13 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
       schoolId: device.schoolId, headsetId: device.headsetId, sessionId,
       detail: { characterId, stopReason: result.stopReason },
     });
-    const tts = await googleTts.synthesize(safety.SAFETY_REDIRECT, character.voice);
+    const tts = await googleTts.synthesize(safety.SAFETY_REDIRECT, character.voice, { deadlineAt });
+    if (tts.timedOut) return timeout504(res, 'tts', deadlineAt);
+    // Spec 12 Part L: the refused turn still consumed tokens — meter them.
+    await meterLlmOnly({
+      device, school, character, result, sttSeconds,
+      ttsChars: tts.cached || tts.failed ? 0 : safety.SAFETY_REDIRECT.length,
+    });
     return res.json({
       transcript, replyText: safety.SAFETY_REDIRECT, audioBase64: tts.audioBase64, emptyTranscript: false,
     });
@@ -200,9 +259,11 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
   replyText = sanitizeResponse(replyText);
 
   // ===== TTS (spec 4.4 step 8) =====
+  if (Date.now() >= deadlineAt) return timeout504(res, 'pre_tts', deadlineAt);
   const tTts = Date.now();
-  const tts = await googleTts.synthesize(replyText, character.voice);
+  const tts = await googleTts.synthesize(replyText, character.voice, { deadlineAt });
   const ttsMs = Date.now() - tTts;
+  if (tts.timedOut) return timeout504(res, 'tts', deadlineAt); // nothing stored, nothing metered
   if (tts.failed) {
     await events.logEvent({
       type: 'provider_error', severity: 'error',
