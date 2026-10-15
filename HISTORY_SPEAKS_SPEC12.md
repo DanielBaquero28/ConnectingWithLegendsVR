@@ -170,6 +170,30 @@ Report these at the end:
 
 ---
 
+## Part J — AI disclosure for minors
+
+- **Unity:** before each conversation starts, show a disclosure panel: "You're about to talk with an AI recreation of [Character]. It's a computer program, not the real person, and it can make mistakes." Show a Continue button; the conversation starts only after it's pressed. Show where it fits in the hub → character flow before building it.
+- **SAFETY_PREAMBLE:** the character stays in character, with one exception. If the student sincerely asks whether they're talking to an AI or a real person, it answers honestly in one short sentence (it's an AI recreation made for learning), then continues in character.
+- **safety.js:** a plain question like "are you an AI?" or "are you real?" is never logged or blocked as a jailbreak. Real manipulation attempts still are.
+- Add the disclosure question to the Part B eval prompts.
+
+## Part K — Data minimization
+
+- Store `snippet` only on server-detected crisis events. Remove it from profanity, jailbreak and safety_block events.
+- Change the retention of the four safety event types from 90 to 30 days. Ops events stay at 30.
+- **SAFETY_PREAMBLE:** the character never asks for or encourages personal information (full name, school, address, contact details, social media). If the student volunteers it, the character doesn't repeat it and steers back to the topic.
+- **README runbook:** add a step with the exact gcloud command for a log exclusion on the `_Default` sink that drops `run.googleapis.com/requests` logs for `hsvr-proxy`, so client IP addresses are not retained. Take the syntax from the current docs. Don't run it.
+
+## Part L — Timeouts and metering
+
+- Give `/converse` an overall server deadline of 20 s covering speech-to-text, the AI and the voice. If it's exceeded, stop the remaining work and return 504 with no safety event and no history write.
+- Raise ProxyClient's request timeout to 25 s, and make sure the headset never automatically resends a `/converse` request after a timeout. It shows the existing in-character network line instead.
+- Meter input tokens on refusal and `llm_empty` turns.
+
+Finish with the green smoke test, a clean Unity batch compile, and a short summary. Don't run Part B and don't deploy.
+
+---
+
 ## Kickoff (paste into Claude Code)
 
 > Read `HISTORY_SPEAKS_SPEC12.md` in the repo root. Start with Part 0: branch, tag, full review and impact map, no edits, then stop for my approval. After that, implement Parts A–H in order, committing after each part. Show me your plan for each part before implementing it, and show each file change before moving on. Use the current Claude API docs for exact header values, the thinking/effort parameters and any data-residency parameter rather than guessing. Respect the do-not-touch list. Finish with a green offline smoke test, a clean Unity batch compile, the Part H report, and the README runbook for Part I. Do not run Part B against the live API until I confirm the key is set.

@@ -116,6 +116,21 @@ public class HubController : MonoBehaviour
         // blocking version froze the headset for the whole character-scene load.
         CharacterSession.Select(character);
         Debug.Log($"[Hub] Selected '{character.characterId}' -> scene '{character.sceneName}', session {CharacterSession.SessionId}");
-        SceneTransition.Load(character.sceneName);
+
+        // Spec 12 Part J: the AI disclosure sits between selection and the scene
+        // load, so the conversation cannot start until Continue is pressed. The
+        // panel is built inside this canvas (same raycasters and ISDK surface
+        // the cards use). If it cannot be shown at all (no canvas / no TMP font)
+        // the scene is NOT loaded: a conversation must never start undisclosed.
+        // The latch is released so the student can try another card.
+        Canvas hubCanvas = cardTemplate != null ? cardTemplate.GetComponentInParent<Canvas>() : null;
+        string sceneName = character.sceneName;
+        bool shown = AiDisclosurePanel.Show(hubCanvas, character.displayName,
+            () => SceneTransition.Load(sceneName));
+        if (!shown)
+        {
+            Debug.LogError("[Hub] AI disclosure panel could not be shown; not loading the character scene.");
+            loadingScene = false;
+        }
     }
 }
