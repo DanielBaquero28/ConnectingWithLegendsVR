@@ -18,9 +18,18 @@ public class VoiceRecognitionController : MonoBehaviour
     // so the existing lock always wins. Set from SetButtonsInteractable.
     private bool buttonsLocked = false;
 
-    // [DIAG] temporary: holds the clip returned by RecordAudio so we can inspect its
-    // amplitude after recording stops (to confirm the mic actually captured sound).
-    private AudioClip capturedClip;
+    // Spec 12 Part P: false while Android's microphone permission is denied.
+    // Re-read at Start and whenever the app regains focus (the student may have
+    // just enabled it in Settings). Always true in the Editor.
+    private bool micAvailable = true;
+    private TMP_Text recordLabel;
+    private string recordLabelDefault;
+    private const string MIC_OFF_TEXT = "Microphone is off — enable it in Settings > Privacy";
+
+    [Header("Microphone (Editor only)")]
+    [Tooltip("Editor only: exact name from Microphone.devices. Empty, or not connected, " +
+             "uses the default device. Ignored in device builds.")]
+    [SerializeField] private string preferredMicDeviceEditor = "";
 
     [Header("Buttons Information")]
     [SerializeField] public Button RecordButton;
@@ -39,20 +48,12 @@ public class VoiceRecognitionController : MonoBehaviour
 
     private void Start()
     {
-#if UNITY_ANDROID
-        // [DIAG] temporary: confirm Android RECORD_AUDIO permission; request it if missing.
-        if (UnityEngine.Android.Permission.HasUserAuthorizedPermission(UnityEngine.Android.Permission.Microphone))
-        {
-            Debug.Log("[DIAG] Android RECORD_AUDIO permission: GRANTED");
-        }
-        else
-        {
-            Debug.LogWarning("[DIAG] Android RECORD_AUDIO permission: NOT granted — requesting now.");
-            UnityEngine.Android.Permission.RequestUserPermission(UnityEngine.Android.Permission.Microphone);
-        }
-#endif
-
         audioRecorder = gameObject.AddComponent<AudioRecorder>();
+#if UNITY_EDITOR
+        // Spec 12 Part P: AudioRecorder falls back to Microphone.devices[0] when
+        // this is empty or not connected. Device builds never set it.
+        audioRecorder.PreferredDevice = preferredMicDeviceEditor;
+#endif
 
         audioRecorder.OnRecordingFinished += OnRecordingAutoStop;
 
@@ -77,70 +78,32 @@ public class VoiceRecognitionController : MonoBehaviour
         if (aiController != null)
             aiController.ProcessingChanged += OnProcessingChanged;
 
-        // [DIAG] temporary: probe each enumerated mic to find which one actually
-        // captures audio on this device (Quest's devices[0] is often silent).
-        StartCoroutine(ProbeMicrophones());
+        // Spec 12 Part P: the hub asked for the permission; here we only read it.
+        if (RecordButton != null)
+        {
+            recordLabel = RecordButton.GetComponentInChildren<TMP_Text>(true);
+            if (recordLabel != null) recordLabelDefault = recordLabel.text;
+            else Debug.LogWarning("[Voice] RecordButton has no TMP label; the microphone-off notice can't be shown.");
+        }
+        RefreshMicAvailability();
     }
 
-    // [DIAG] temporary: records a short burst from EVERY microphone device and logs the
-    // peak amplitude for each, so we can identify which device carries the headset mic.
-    // Self-contained — does not touch AudioRecorder or the normal recording path.
-    private IEnumerator ProbeMicrophones()
+    private void OnApplicationFocus(bool hasFocus)
     {
-        // Give the audio system a moment to settle after scene load.
-        yield return new WaitForSeconds(0.5f);
+        // Returning from the permission dialog or from Settings.
+        if (hasFocus && audioRecorder != null) RefreshMicAvailability();
+    }
 
-        Debug.Log("[DIAG-PROBE] Starting per-device mic probe. " +
-                  "KEEP TALKING / making noise continuously for the next ~6 seconds...");
-
-        string[] devices = Microphone.devices;
-        if (devices.Length == 0)
-        {
-            Debug.LogWarning("[DIAG-PROBE] No microphone devices to probe.");
-            yield break;
-        }
-
-        const int probeFreq = 16000;
-        const float probeSeconds = 1.5f;
-
-        foreach (string dev in devices)
-        {
-            Debug.Log($"[DIAG-PROBE] Testing '{dev}' — speak NOW...");
-
-            AudioClip probe = Microphone.Start(dev, false, 2, probeFreq);
-            if (probe == null)
-            {
-                Debug.LogWarning($"[DIAG-PROBE] '{dev}': Microphone.Start returned null.");
-                continue;
-            }
-
-            yield return new WaitForSeconds(probeSeconds);
-
-            int pos = Microphone.GetPosition(dev);
-            Microphone.End(dev);
-
-            float peak = 0f;
-            double sumAbs = 0.0;
-            int counted = 0;
-            if (pos > 0)
-            {
-                float[] s = new float[probe.samples * probe.channels];
-                probe.GetData(s, 0);
-                counted = Mathf.Min(pos, s.Length);
-                for (int i = 0; i < counted; i++)
-                {
-                    float a = Mathf.Abs(s[i]);
-                    if (a > peak) peak = a;
-                    sumAbs += a;
-                }
-            }
-            float avg = counted > 0 ? (float)(sumAbs / counted) : 0f;
-
-            Debug.Log($"[DIAG-PROBE] '{dev}': position={pos}, peak abs={peak:F5}, avg abs={avg:F5} " +
-                      (peak > 0.0005f ? "<-- THIS DEVICE CAPTURES AUDIO" : "(silent / dead)"));
-        }
-
-        Debug.Log("[DIAG-PROBE] Probe complete. Use the device marked 'CAPTURES AUDIO'.");
+    // Spec 12 Part P: denied -> Record shows the notice and stays disabled;
+    // typing and Submit are unaffected. Granted -> original label back.
+    private void RefreshMicAvailability()
+    {
+        micAvailable = MicrophonePermission.IsGranted;
+        if (recordLabel != null)
+            recordLabel.text = micAvailable ? recordLabelDefault : MIC_OFF_TEXT;
+        if (!micAvailable && RecordButton != null)
+            RecordButton.interactable = false;
+        ApplyInputModeButtons(); // no-op while locked; the lock re-applies on release
     }
 
     private void OnDestroy()
@@ -183,14 +146,13 @@ public class VoiceRecognitionController : MonoBehaviour
 
     public void StartRecording()
     {
-        Debug.Log("[Voice] Started recording!");
+        if (!micAvailable)
+        {
+            Debug.LogWarning("[Voice] Record ignored: microphone permission is off.");
+            return;
+        }
 
-        // [DIAG] temporary: enumerate microphones and report which device AudioRecorder
-        // will hand to Microphone.Start (it uses Microphone.devices[0]).
-        string[] mics = Microphone.devices;
-        Debug.Log($"[DIAG] Microphone.devices ({mics.Length}): [{string.Join(", ", mics)}]");
-        Debug.Log($"[DIAG] Device that will be passed to Microphone.Start: " +
-                  (mics.Length > 0 ? mics[0] : "<null - no microphone found>"));
+        Debug.Log("[Voice] Started recording!");
 
         SetButtonsInteractable(false);
         processingInProgress = false;
@@ -200,7 +162,6 @@ public class VoiceRecognitionController : MonoBehaviour
         CountdownText.text = COUNTDOWN_PREFIX + audioRecorder.GetMaxDuration();
 
         AudioClip audioClip = audioRecorder.RecordAudio();
-        capturedClip = audioClip; // [DIAG] keep a reference for post-stop amplitude analysis
 
         if (audioClip == null)
         {
@@ -239,49 +200,8 @@ public class VoiceRecognitionController : MonoBehaviour
 
         audioRecorder.StopRecording();
 
-        // [DIAG] temporary: inspect the captured clip's amplitude to tell silence
-        // (peak near 0) from real audio. Reads the Microphone clip we kept a reference to.
-        if (capturedClip != null)
-        {
-            float[] samples = new float[capturedClip.samples * capturedClip.channels];
-            capturedClip.GetData(samples, 0);
-
-            float peak = 0f;
-            double sumAbs = 0.0;
-            for (int i = 0; i < samples.Length; i++)
-            {
-                float a = Mathf.Abs(samples[i]);
-                if (a > peak) peak = a;
-                sumAbs += a;
-            }
-            float avg = samples.Length > 0 ? (float)(sumAbs / samples.Length) : 0f;
-
-            Debug.Log($"[DIAG] Captured clip: {capturedClip.samples} samples, " +
-                      $"{capturedClip.channels}ch, {capturedClip.frequency}Hz | " +
-                      $"peak abs={peak:F5}, avg abs={avg:F5}");
-
-            if (peak < 0.0001f)
-                Debug.LogWarning("[DIAG] Captured audio is effectively SILENT (peak ~0) — " +
-                                 "the microphone is not capturing sound.");
-        }
-        else
-        {
-            Debug.LogWarning("[DIAG] No captured AudioClip reference to analyze.");
-        }
-
         string audioPath = audioRecorder.SaveWavFile(null, AudioPromptCleanup.FilePath);
         Debug.Log($"[Voice] Audio saved to: {audioPath}");
-
-        // [DIAG] temporary: report the saved WAV's byte length on disk.
-        try
-        {
-            long wavBytes = new System.IO.FileInfo(audioPath).Length;
-            Debug.Log($"[DIAG] Saved WAV byte length: {wavBytes} bytes");
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogWarning("[DIAG] Could not read saved WAV length: " + e.Message);
-        }
 
         // One round trip to the proxy: STT + reply + voice come back together.
         // The AI controller owns the request lock, the session ID, and all
@@ -333,6 +253,7 @@ public class VoiceRecognitionController : MonoBehaviour
     // Single source of truth for the idle input-mode rule (Spec 5, Fix 3):
     //   field empty    -> not typing: enable Record, disable Submit
     //   field has text -> typing:     disable Record, enable Submit
+    //   mic permission off (Spec 12 Part P) -> Record stays disabled either way
     // No-ops while locked (recording / processing) so the existing lock always
     // wins. Called from SetButtonsInteractable(true) AND from PromptUIController's
     // onValueChanged handler, so the voice re-enable path and live typing share
@@ -346,7 +267,7 @@ public class VoiceRecognitionController : MonoBehaviour
         TMP_InputField promptField = aiController != null ? aiController.PromptField : OutputField;
         bool hasText = promptField != null && !string.IsNullOrEmpty(promptField.text);
 
-        if (RecordButton != null) RecordButton.interactable = !hasText;
+        if (RecordButton != null) RecordButton.interactable = micAvailable && !hasText;
         if (SubmitButton != null) SubmitButton.interactable = hasText;
     }
 }

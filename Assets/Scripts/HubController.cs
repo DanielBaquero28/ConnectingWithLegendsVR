@@ -26,6 +26,10 @@ public class HubController : MonoBehaviour
 
     private void Start()
     {
+        // Spec 12 Part P: ask for the microphone here, before any early return,
+        // so the dialog never interrupts a conversation scene.
+        MicrophonePermission.RequestIfNeeded();
+
         if (registry == null || registry.characters == null || registry.characters.Count == 0)
         {
             Debug.LogError("[Hub] CharacterRegistry not assigned or empty on HubController.");

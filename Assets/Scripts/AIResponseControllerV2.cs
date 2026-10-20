@@ -33,6 +33,9 @@ public class AIResponseControllerV2 : MonoBehaviour
     private const string NETWORK_ERROR =
         "Forgive me — my thoughts seem to wander just now. Would you ask me once more?";
 
+    // Spec 12 Part P: shown when the server heard nothing in the recording.
+    private const string EMPTY_TRANSCRIPT = "I didn't quite catch that — please try again";
+
     // Server-side history is keyed on this; new GUID at start and on reset.
     private string sessionId;
 
@@ -241,8 +244,11 @@ public class AIResponseControllerV2 : MonoBehaviour
             if (response.emptyTranscript || string.IsNullOrEmpty(response.transcript))
             {
                 // Nothing was heard — keep whatever is in the field so the
-                // student can retry; the voice controller re-enables buttons.
+                // student can retry. Spec 12 Part P: say so (text only, no
+                // further call); the finally clears "Processing..." and the
+                // voice controller re-enables buttons.
                 Debug.LogWarning("[AI] Empty transcript from proxy (didn't catch that).");
+                ResponseText.text = EMPTY_TRANSCRIPT;
                 yield break;
             }
 
