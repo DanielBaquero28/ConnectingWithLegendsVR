@@ -17,10 +17,11 @@ using UnityEngine.UI;
 // The student's view moves a lot: the board is head-locked, and in four of
 // the five scenes the conversation canvas is behind the spawn facing. So the
 // canvas is not fixed in the world; TagAlong keeps it 0.9 m from the head,
-// 32 degrees left and 22 degrees down, and only swings round after the
+// 35 degrees left and 22 degrees down, and only swings round after the
 // student turns more than 40 degrees. That is clear of the board's left edge
-// (the board spans about +/-25 degrees at 1.1 m) and an easy point-down-left
-// with either controller.
+// (the board spans about +/-25 degrees at 1.1 m), clear of Record, and an
+// easy point-down-left with either controller. (Part S used 32 degrees; the
+// 25% larger button in Part T needed 3 more to keep the board clearance.)
 //
 // ----- Ray input -----
 // Built like Prompt Canvas v2's Inspector setup, in code: a GraphicRaycaster
@@ -34,9 +35,10 @@ public static class BackToHubButton
 {
     private const string LABEL = "Back to Hub";
 
-    // Canvas units -> metres. The 150x30 button is 0.18 m x 0.036 m and the
-    // 14 pt label about 17 mm tall: legible at 0.9 m on the Quest 3.
-    public const float CANVAS_SCALE = 0.0012f;
+    // Canvas units -> metres. The 150x30 button is 0.225 m x 0.045 m and the
+    // 14 pt label about 21 mm tall at 0.9 m (Part T: 25% larger than the
+    // Part S 0.0012; size and label scale together).
+    public const float CANVAS_SCALE = 0.0015f;
     public static readonly Vector2 CANVAS_SIZE = new Vector2(160f, 40f);
 
     // Why the button cannot be built in this scene, or null when it can.

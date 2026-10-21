@@ -14,7 +14,7 @@ public class TagAlong : MonoBehaviour
     public Transform Head;
 
     [SerializeField] private float distance = 0.9f;
-    [SerializeField] private float yawOffset = -32f;
+    [SerializeField] private float yawOffset = -35f;
     [SerializeField] private float pitch = 22f;
     [SerializeField] private float followAngle = 40f;
     [SerializeField] private float smoothTime = 0.35f;

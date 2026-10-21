@@ -21,7 +21,10 @@ using UnityEngine.UI;
 // Part S: Report must be under the response panel. Back to Hub must be on its
 // own always-active world-space root canvas with ISDK ray input, 0.5–1.2 m
 // from the head, within 45 degrees of its facing, below eye level and clear
-// of the head-locked board, as placed from the head's saved pose.
+// of the head-locked board, as placed from the head's saved pose. Part T:
+// also clear of Record with the head turned to the prompt canvas and to
+// Record itself. Clearances allow for half the Back to Hub canvas width, so
+// they follow BackToHubButton.CANVAS_SCALE.
 //
 // Menu: HistorySpeaks > Check Conversation Buttons.
 // Batch (Editor closed):
@@ -179,7 +182,8 @@ public static class ConversationButtonsCheck
         if (offset.y >= 0f || down > 35f) return $"Back to Hub is not comfortably below eye level ({down:F0} degrees down)";
         if (Vector3.Angle(root.forward, offset) > 5f) return "Back to Hub canvas does not face the head";
 
-        // The board (the button that starts the intro) must not cover it.
+        // The board (the button that starts the intro) must not cover it, as
+        // placed from the head's saved (spawn) pose.
         Button board = Object.FindObjectsOfType<Button>(true).FirstOrDefault(b =>
             Enumerable.Range(0, b.onClick.GetPersistentEventCount())
                 .Any(i => b.onClick.GetPersistentMethodName(i) == "PlayIntro"));
@@ -187,25 +191,77 @@ public static class ConversationButtonsCheck
         if (board != null)
         {
             RectTransform boardRect = (RectTransform)board.GetComponentsInParent<Canvas>(true).Last().transform;
-            Plane boardPlane = new Plane(boardRect.forward, boardRect.position);
-            Ray sight = new Ray(head.position, offset);
-            if (boardPlane.Raycast(sight, out float hit))
+            boardNote = Overlap(head, root, boardRect, "the board", out string fail);
+            if (fail != null) return fail;
+        }
+
+        // Record must not be covered either. During the conversation the
+        // student faces the prompt canvas, so re-place Back to Hub from a
+        // stand-in head at the same spot looking at the canvas centre, then
+        // straight at Record, and test both.
+        string recordNote = "no Record button found";
+        VoiceRecognitionController voice = Object.FindObjectsOfType<VoiceRecognitionController>(true).FirstOrDefault();
+        if (voice != null && voice.RecordButton != null)
+        {
+            RectTransform record = (RectTransform)voice.RecordButton.transform;
+            TagAlong follow = root.GetComponent<TagAlong>();
+            GameObject standIn = new GameObject("~CheckHead");
+            try
             {
-                Vector2 local = boardRect.InverseTransformPoint(sight.GetPoint(hit));
-                Rect inner = boardRect.rect;
-                if (hit < offset.magnitude) return "the board is in front of Back to Hub";
-                // Margin: half the Back to Hub width, in board units.
-                float margin = 0.5f * BackToHubButton.CANVAS_SIZE.x * BackToHubButton.CANVAS_SCALE * hit
-                               / offset.magnitude / boardRect.lossyScale.x;
-                inner.xMin += -margin; inner.xMax += margin; inner.yMin += -margin; inner.yMax += margin;
-                if (inner.Contains(local)) return "Back to Hub sits over the board";
-                boardNote = "clear of the board";
+                standIn.transform.position = head.position;
+                foreach (Vector3 lookAt in new[] { promptCanvas.transform.position, record.position })
+                {
+                    standIn.transform.rotation = Quaternion.LookRotation(lookAt - head.position, Vector3.up);
+                    follow.Head = standIn.transform;
+                    follow.Snap();
+                    recordNote = Overlap(standIn.transform, root, record, "Record", out string fail);
+                    if (fail != null) return fail;
+                }
             }
-            else boardNote = "board not in the line of sight";
+            finally
+            {
+                follow.Head = head;
+                follow.Snap();
+                Object.DestroyImmediate(standIn);
+            }
         }
 
         Debug.Log($"[ButtonsCheck]   {sceneName}: Back to Hub {offset.magnitude:F2} m from the head, " +
-                  $"{yaw:F0} deg to the side, {down:F0} deg down, {boardNote}");
+                  $"{yaw:F0} deg to the side, {down:F0} deg down, {boardNote}, {recordNote}");
         return null;
+    }
+
+    // Projects Back to Hub's centre from the head onto `target`'s plane and
+    // fails if it lands within half the Back to Hub canvas width of the
+    // target's rect, or if the target is in front of Back to Hub. Returns a
+    // note for the log; `fail` is set on failure.
+    private static string Overlap(Transform head, Transform back, RectTransform target, string what, out string fail)
+    {
+        fail = null;
+        Vector3 offset = back.position - head.position;
+        Plane plane = new Plane(target.forward, target.position);
+        Ray sight = new Ray(head.position, offset);
+        if (!plane.Raycast(sight, out float hit)) return what + " not in the line of sight";
+        if (hit < offset.magnitude)
+        {
+            fail = what + " is in front of Back to Hub";
+            return null;
+        }
+
+        Vector2 local = target.InverseTransformPoint(sight.GetPoint(hit));
+        // Margin: half the Back to Hub canvas width, projected, in target units.
+        float margin = 0.5f * BackToHubButton.CANVAS_SIZE.x * BackToHubButton.CANVAS_SCALE * hit
+                       / offset.magnitude / target.lossyScale.x;
+        Rect r = target.rect;
+        Rect grown = new Rect(r.xMin - margin, r.yMin - margin, r.width + 2f * margin, r.height + 2f * margin);
+        if (grown.Contains(local))
+        {
+            fail = "Back to Hub sits over " + what;
+            return null;
+        }
+        // Clearance from the grown rect's nearest edge, in metres at the target.
+        float dx = Mathf.Max(grown.xMin - local.x, local.x - grown.xMax, 0f);
+        float dy = Mathf.Max(grown.yMin - local.y, local.y - grown.yMax, 0f);
+        return $"clear of {what} by {Mathf.Max(dx, dy) * target.lossyScale.x:F2} m";
     }
 }
