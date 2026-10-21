@@ -170,6 +170,90 @@ Report these at the end:
 
 ---
 
+## Part J — AI disclosure for minors
+
+- **Unity:** before each conversation starts, show a disclosure panel: "You're about to talk with an AI recreation of [Character]. It's a computer program, not the real person, and it can make mistakes." Show a Continue button; the conversation starts only after it's pressed. Show where it fits in the hub → character flow before building it.
+- **SAFETY_PREAMBLE:** the character stays in character, with one exception. If the student sincerely asks whether they're talking to an AI or a real person, it answers honestly in one short sentence (it's an AI recreation made for learning), then continues in character.
+- **safety.js:** a plain question like "are you an AI?" or "are you real?" is never logged or blocked as a jailbreak. Real manipulation attempts still are.
+- Add the disclosure question to the Part B eval prompts.
+
+## Part K — Data minimization
+
+- Store `snippet` only on server-detected crisis events. Remove it from profanity, jailbreak and safety_block events.
+- Change the retention of the four safety event types from 90 to 30 days. Ops events stay at 30.
+- **SAFETY_PREAMBLE:** the character never asks for or encourages personal information (full name, school, address, contact details, social media). If the student volunteers it, the character doesn't repeat it and steers back to the topic.
+- **README runbook:** add a step with the exact gcloud command for a log exclusion on the `_Default` sink that drops `run.googleapis.com/requests` logs for `hsvr-proxy`, so client IP addresses are not retained. Take the syntax from the current docs. Don't run it.
+
+## Part L — Timeouts and metering
+
+- Give `/converse` an overall server deadline of 20 s covering speech-to-text, the AI and the voice. If it's exceeded, stop the remaining work and return 504 with no safety event and no history write.
+- Raise ProxyClient's request timeout to 25 s, and make sure the headset never automatically resends a `/converse` request after a timeout. It shows the existing in-character network line instead.
+- Meter input tokens on refusal and `llm_empty` turns.
+
+Finish with the green smoke test, a clean Unity batch compile, and a short summary. Don't run Part B and don't deploy.
+
+---
+
+## Part M — Anthropic minors safeguards
+
+- **Disclosure panel:** add a line under the existing text: "By continuing, you confirm you're 13 or older."
+- **"Report this answer" button** in the conversation UI, enabled only after a character reply has played. It calls a new `POST /report` with `{ sessionId, characterId }`, using device-token auth, fire-and-forget with retries, never blocking the UI. The device sends no text.
+- **Server:** reads the last character reply from that session's document and writes a `user_report` event that includes that reply only, never student text. TTL 30 days. Send a Slack alert to #hsvr-safety in the same text-free format as other alerts. One report per character reply; ignore repeats.
+- **Smoke test:** extend it to cover `/report`, including that no student text is ever stored on the event.
+
+Then run Part B (all ten characters on every config), commit `server/eval/report-<date>.md`, and summarise per character and config: mean and p95 latency; mean word count and the count of replies over 60 words; refusals and empty replies; total cost; how each config handled the break-character, disclosure, post-era and sensitive-question prompts, with the single worst reply quoted per config. Then recommend a config per character.
+
+---
+
 ## Kickoff (paste into Claude Code)
 
 > Read `HISTORY_SPEAKS_SPEC12.md` in the repo root. Start with Part 0: branch, tag, full review and impact map, no edits, then stop for my approval. After that, implement Parts A–H in order, committing after each part. Show me your plan for each part before implementing it, and show each file change before moving on. Use the current Claude API docs for exact header values, the thinking/effort parameters and any data-residency parameter rather than guessing. Respect the do-not-touch list. Finish with a green offline smoke test, a clean Unity batch compile, the Part H report, and the README runbook for Part I. Do not run Part B against the live API until I confirm the key is set.
+
+---
+
+## Part N — Eval fixes
+
+Decision on Part B: use `haiku-5-5` with thinking disabled for all ten characters. No Sonnet for now.
+
+1. **Thinking setting:** add a `thinking` field to the character seed and admin validation (`"disabled"` or `"adaptive"`). Set all ten seeds to `"disabled"` and send `thinking: { type: "disabled" }` accordingly. Omit `output_config.effort` when thinking is disabled, if the docs require that.
+2. **Length:**
+   - Tighten SAFETY_PREAMBLE to "Answer in two or three short sentences, never more than 40 words."
+   - Change the server truncation so it never cuts mid-sentence. If a reply is over the limit, cut at the last complete sentence at or under 50 words. Only if there's no sentence boundary, cut at 50 words without an ellipsis.
+3. **Reasoning leak guard:** add an output check. If a reply contains meta-language about the conversation or instructions (for example "the student", "I should", "in character", "the user", "my instructions", "system prompt"), don't ship it. Retry once, and if it fails again, return the existing safety redirect line. Write an ops event `reply_meta_leak` with no text.
+4. **Era discipline:** add to SAFETY_PREAMBLE that the character knows nothing that happened after their death or their knowledge cutoff, including honors, memorials, films, currency or anything named after them. If asked, they say they can't know that and steer back to their own time.
+5. **Tubman facts:** correct the head-injury fact in Tubman's seed (she was about twelve or thirteen) and check her seed's other key facts against reliable sources.
+6. **Report button:** disarm it after a safety redirect or crisis message, not only after a new request.
+7. **Re-run Part B** for `haiku-5-5@no-thinking` only, all ten characters. Report: mean and p95 latency; mean words, the count over 40 and over 50 words, and any truncated replies; any meta leaks; the Tubman post-era answer quoted; any reply considered a failure.
+
+Also confirm in writing: (a) the currently installed Quest APK keeps working against the new server for `/converse`, so a server-only cutover can't break headsets in the field; (b) the runbook's deploy step sets `ALLOW_GENERATIVE_TTS=true` for now. Keep the Chirp voices for MLK, Lincoln and Caesar until counsel answers. Don't deploy.
+
+---
+
+## Part O — Length and persona fixes
+
+- Count the words in every few-shot assistant reply in all ten seeds. Rewrite any over 35 words down to 35 or fewer, keeping the voice and the closing question.
+- Append the limit to the current user turn in the request builder: after the student's text, add "(Reply in at most 40 words, in two or three sentences, ending with a short question when natural.)". Do it in the request only; never store it in session history.
+- SAFETY_PREAMBLE: "Always speak in the first person as yourself; never refer to yourself by name in the third person." Also: "Repeat only well-documented history; if a famous story is disputed or a myth, say so or don't tell it."
+- Lincoln seed: add a short "common myths" line (for example, the Gettysburg Address was not written on the back of an envelope on the train). Add one or two equivalent myth lines to any other seed where a well-known myth exists.
+- Re-run `haiku-5-5@no-thinking`, all ten characters. Report the same metrics as last time, plus how many sentence-cuts dropped a closing question.
+
+Acceptance: at most 5 of 70 replies over 50 words raw, zero meta leaks, zero identifiable factual failures. If the re-run passes, commit and report it passed. If not, show the numbers and stop.
+
+If it passes, start the cutover: execute the README runbook one step at a time, showing each command before running it and waiting for an OK. Never print secret values. Stop before switching traffic so the tagged revision's smoke results can be reviewed.
+
+---
+
+## Part Q — Quest test fixes
+
+1. **Back to Hub.** First report what navigation exists today (any button, controller binding or timeout). Then add a visible "Back to Hub" button to the conversation UI in every character scene, built the same way as the Report button. It must be safe mid-request: stop audio and coroutines, release the request lock, and ignore any late server response, then load the hub.
+2. **Hub welcome panel.** On each app launch (not on every return to the hub), show a short panel: "Welcome to History Speaks. Pick a figure from history and talk with them. Point at Record, speak your question, and wait for the answer — or type it. These are AI recreations for learning." Add a "Start" button. Same input blocking as the disclosure panel.
+3. **Disclosure panel:** about 30% smaller, text still readable on the Quest.
+4. **Report button:**
+   - When not interactable, it must look clearly disabled (greyed tint, dimmed label).
+   - Input was seen locked around a report: after pressing it, the text couldn't be edited and Record didn't work. Check whether `/report` or the button touches the request lock, the input field or the Record button, fix the cause, and explain what it was.
+5. **Personal info:** extend the user-turn suffix: "…ending with a short question when natural. Never repeat names, schools or other personal details the student mentions." Keep the preamble rule. Request-only, never stored. Add a smoke assertion.
+6. **Pre-recorded fallback lines** for the five scene characters (Einstein, MLK, Cleopatra, Caesar, Lincoln):
+   - Render with the existing render script and each character's current seed voice: the network-error line (the existing text) and "I didn't quite catch that — please try again." Read the TTS key the same no-echo way as before.
+   - Store the clips next to the crisis clips, add fields for them on the per-character asset and wire them up, and play them whenever those lines are shown. Text stays as now.
+
+Don't deploy anything; this is all Unity plus the request-builder change. Item 5 changes the server, so give the deploy command for it separately, without running it. Compile with `-buildTarget Android`, run the smoke test, and commit.

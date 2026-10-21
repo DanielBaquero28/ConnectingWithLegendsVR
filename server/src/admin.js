@@ -6,6 +6,8 @@ const express = require('express');
 const { adminAuth } = require('./auth');
 const { getDb } = require('./db');
 const characters = require('./characters');
+const claude = require('./providers/claude');
+const voice = require('./voice');
 const metering = require('./metering');
 const events = require('./events');
 const log = require('./log');
@@ -93,6 +95,37 @@ router.put('/characters/:characterId', async (req, res, next) => {
     const doc = req.body;
     if (!doc || typeof doc !== 'object' || !doc.systemPersona) {
       return res.status(400).json({ error: 'Body must be a full character doc (systemPersona required)' });
+    }
+    // Spec 12: a model with no price entry would be metered at the wrong rate
+    // (and may not exist); an effort the docs don't list would 400 at runtime.
+    // Both fail here, at seed time, instead.
+    if (doc.modelName !== undefined && !metering.isKnownModel(doc.modelName)) {
+      return res.status(400).json({
+        error: `Unknown modelName; must be one of: ${Object.keys(metering.PRICES.llmPerMTokens).join(', ')}`,
+      });
+    }
+    if (doc.effort !== undefined && !claude.EFFORT_VALUES.includes(doc.effort)) {
+      return res.status(400).json({ error: `Invalid effort; must be one of: ${claude.EFFORT_VALUES.join(', ')}` });
+    }
+    // Spec 12 Part N: thinking "disabled" or "adaptive". Per the docs, Haiku
+    // 5.5 returns 400 for thinking disabled at xhigh/max effort — catch it here.
+    if (doc.thinking !== undefined && !claude.THINKING_VALUES.includes(doc.thinking)) {
+      return res.status(400).json({ error: `Invalid thinking; must be one of: ${claude.THINKING_VALUES.join(', ')}` });
+    }
+    const effectiveThinking = doc.thinking !== undefined ? doc.thinking : claude.DEFAULT_THINKING;
+    if (effectiveThinking === 'disabled' && claude.EFFORT_REQUIRING_THINKING.includes(doc.effort)) {
+      return res.status(400).json({
+        error: `effort "${doc.effort}" requires thinking "adaptive" (thinking cannot be disabled at ${claude.EFFORT_REQUIRING_THINKING.join('/')})`,
+      });
+    }
+    // Spec 12 Part C: no generative (Chirp) voice may be seeded while
+    // ALLOW_GENERATIVE_TTS is off — fail here, loudly, not silently at synth time.
+    const voiceName = doc.voice && doc.voice.voiceName;
+    if (voiceName && !voice.isVoiceAllowed(voiceName)) {
+      return res.status(400).json({
+        error: `voice.voiceName "${voiceName}" is a generative (Chirp) voice, which is disabled ` +
+          '(set ALLOW_GENERATIVE_TTS=true to allow it, or recast to a Neural2/Studio/WaveNet voice)',
+      });
     }
     await getDb().collection('characters').doc(characterId).set(doc);
     characters.invalidate(characterId); // this instance serves the update immediately

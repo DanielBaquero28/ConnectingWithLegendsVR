@@ -21,6 +21,13 @@ app.get('/status', (req, res) => {
 // The single conversation endpoint (spec 4.4).
 app.use('/converse', require('./converse').router);
 
+// Device-reported typed-path crisis (spec 12 Part G): metadata only, no text.
+app.use('/crisis-report', require('./crisisReport').router);
+
+// "Report this answer" (spec 12 Part M): metadata only, the server attaches
+// the last character reply itself.
+app.use('/report', require('./report').router);
+
 // Provisioning/inspection endpoints behind X-Admin-Key (spec 4.6).
 app.use('/admin', require('./admin').router);
 
@@ -30,7 +37,7 @@ app.use((err, req, res, next) => {
   if (err && err.type === 'entity.too.large') {
     return res.status(413).json({ error: 'Request too large' });
   }
-  log.error('server.unhandled_error', { path: req.path, message: err && err.message });
+  log.error('server.unhandled_error', { path: req.path, error: String((err && err.message) || err).slice(0, 200) });
   require('./alerts').feedServerError();
   if (res.headersSent) return next(err);
   return res.status(500).json({ error: 'Internal server error' });

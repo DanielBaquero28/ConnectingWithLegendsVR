@@ -32,7 +32,7 @@ function send(webhookEnvName, text) {
     .then((res) => {
       if (!res.ok) log.error('alerts.send_failed', { webhook: webhookEnvName, status: res.status });
     })
-    .catch((err) => log.error('alerts.send_failed', { webhook: webhookEnvName, message: err.message }));
+    .catch((err) => log.error('alerts.send_failed', { webhook: webhookEnvName, error: String(err.message || err).slice(0, 200) }));
 }
 
 function stamp() {
@@ -61,17 +61,36 @@ async function shouldFire(key, rule) {
   });
 }
 
-// 🚨 CRISIS — immediate, never throttled. Snippet + sessionId included so a
-// human can act on it (spec 4.7).
-function alertCrisis({ schoolName, headsetLabel, sessionId, snippet }) {
+// 🚨 CRISIS — immediate, never throttled. Spec 12 Part G payload audit: every
+// Slack message carries ONLY event type, school, headset label, character,
+// timestamp and event ID — never student text, reply snippets or session IDs.
+// The flagged text (server-detected crises only) lives in the events doc,
+// which staff open by the event ID below.
+function alertCrisis({ schoolName, headsetLabel, characterId, eventId, source }) {
   try {
     send(
       'SLACK_WEBHOOK_SAFETY',
-      `🚨 CRISIS — school: ${schoolName} — headset: ${headsetLabel} — session: ${sessionId}\n` +
-        `> "${snippet}"\n${stamp()}`
+      `🚨 CRISIS (${source || 'server'}) — school: ${schoolName} — headset: ${headsetLabel} — ` +
+        `character: ${characterId || 'n/a'} — event: ${eventId || 'n/a'}\n${stamp()}`
     );
   } catch (err) {
-    log.error('alerts.crisis_failed', { message: err.message });
+    log.error('alerts.crisis_failed', { error: String(err.message || err).slice(0, 200) });
+  }
+}
+
+// 📣 REPORT — a student pressed "Report this answer" (spec 12 Part M). Same
+// text-free payload as the crisis alert; the reported reply lives on the
+// user_report event, which staff open by the event ID. Not throttled: the
+// server already accepts at most one report per character reply.
+function alertUserReport({ schoolName, headsetLabel, characterId, eventId }) {
+  try {
+    send(
+      'SLACK_WEBHOOK_SAFETY',
+      `📣 REPORT — school: ${schoolName} — headset: ${headsetLabel} — ` +
+        `character: ${characterId || 'n/a'} — event: ${eventId || 'n/a'}\n${stamp()}`
+    );
+  } catch (err) {
+    log.error('alerts.user_report_failed', { error: String(err.message || err).slice(0, 200) });
   }
 }
 
@@ -87,7 +106,7 @@ async function feedPattern({ headsetId, schoolName, headsetLabel }) {
       );
     }
   } catch (err) {
-    log.error('alerts.pattern_failed', { message: err.message });
+    log.error('alerts.pattern_failed', { error: String(err.message || err).slice(0, 200) });
   }
 }
 
@@ -101,7 +120,7 @@ function alertBudget({ schoolName, percent, totalCostUsd, monthlyBudgetUsd }) {
         `($${totalCostUsd.toFixed(2)} of $${monthlyBudgetUsd.toFixed(2)}).\n${stamp()}`
     );
   } catch (err) {
-    log.error('alerts.budget_failed', { message: err.message });
+    log.error('alerts.budget_failed', { error: String(err.message || err).slice(0, 200) });
   }
 }
 
@@ -116,7 +135,7 @@ async function feedProviderError(provider, { schoolName, headsetLabel } = {}) {
       );
     }
   } catch (err) {
-    log.error('alerts.provider_errors_failed', { message: err.message });
+    log.error('alerts.provider_errors_failed', { error: String(err.message || err).slice(0, 200) });
   }
 }
 
@@ -127,8 +146,8 @@ async function feedServerError() {
       send('SLACK_WEBHOOK_OPS', `🟥 5xx — 3+ unhandled server errors within 5 minutes.\n${stamp()}`);
     }
   } catch (err) {
-    log.error('alerts.server_errors_failed', { message: err.message });
+    log.error('alerts.server_errors_failed', { error: String(err.message || err).slice(0, 200) });
   }
 }
 
-module.exports = { alertCrisis, feedPattern, alertBudget, feedProviderError, feedServerError };
+module.exports = { alertCrisis, alertUserReport, feedPattern, alertBudget, feedProviderError, feedServerError };

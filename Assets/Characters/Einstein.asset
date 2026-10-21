@@ -19,3 +19,5 @@ MonoBehaviour:
   cardTint: {r: 0.24313726, g: 0.20392157, b: 0.15686275, a: 1}
   sceneName: MainScene
   available: 1
+  networkErrorClip: {fileID: 8300000, guid: d07f469395764e2eb0846ab2610c53fe, type: 3}
+  didntCatchClip: {fileID: 8300000, guid: eb71854474d14e1793f69efa16cd8efd, type: 3}

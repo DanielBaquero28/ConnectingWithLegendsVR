@@ -28,4 +28,17 @@ public class CharacterDefinition : ScriptableObject
 
     [Tooltip("False renders the card locked (\"Coming soon\", non-interactable).")]
     public bool available;
+
+    // Spec 12 Part Q: pre-rendered fallback lines in this character's voice,
+    // played by AIResponseControllerV2 when it shows the matching text. They
+    // live next to the crisis clip in Assets/Characters/Voice Clips/<name>/.
+    // Empty = the line is shown as text only.
+    [Header("Fallback lines (pre-rendered)")]
+    [Tooltip("\"Forgive me — my thoughts seem to wander just now. Would you ask me once more?\" " +
+             "Played when a request fails (network error or timeout).")]
+    public AudioClip networkErrorClip;
+
+    [Tooltip("\"I didn't quite catch that — please try again.\" Played when the " +
+             "server heard nothing in the recording.")]
+    public AudioClip didntCatchClip;
 }

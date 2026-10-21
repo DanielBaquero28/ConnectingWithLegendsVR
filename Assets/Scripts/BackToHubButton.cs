@@ -1,58 +1,110 @@
-using System.Collections;
+using System;
+using Oculus.Interaction;
+using Oculus.Interaction.Surfaces;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-// "Back to Hub" (Spec 7). Scene component on the character scene's world-space
-// button. Wire the Button's OnClick to OnBackToHub().
+// Spec 12 Part Q/S — the "Back to Hub" button in every character scene.
 //
-// Ends the conversation cleanly: if a /converse request is in flight
-// (aiController.IsProcessing), it waits for the lock to release before
-// loading HubScene, so no request is left dangling when the scene — and the
-// coroutines driving the request — are destroyed. ProxyClient's worst case is
-// ~47s (3 attempts x 15s timeout + backoff); the 60s failsafe below only
-// fires if the lock is somehow stuck beyond that, rather than trapping the
-// student in the scene forever.
-public class BackToHubButton : MonoBehaviour
+// Part S: it lives on its OWN small world-space canvas, a scene root that is
+// active from the moment the scene loads, so it can be used before the board
+// button is pressed, during the intro and during replies. (Part Q hung it off
+// the response panel inside Prompt Canvas v2, which is saved inactive and
+// only revealed by the board button.) The Report button stays on the panel.
+//
+// ----- Where it sits -----
+// The student's view moves a lot: the board is head-locked, and in four of
+// the five scenes the conversation canvas is behind the spawn facing. So the
+// canvas is not fixed in the world; TagAlong keeps it 0.9 m from the head,
+// 35 degrees left and 22 degrees down, and only swings round after the
+// student turns more than 40 degrees. That is clear of the board's left edge
+// (the board spans about +/-25 degrees at 1.1 m), clear of Record, and an
+// easy point-down-left with either controller. (Part S used 32 degrees; the
+// 25% larger button in Part T needed 3 more to keep the board clearance.)
+//
+// ----- Ray input -----
+// Built like Prompt Canvas v2's Inspector setup, in code: a GraphicRaycaster
+// (PointableCanvasModule raycasts through it), a PointableCanvas, and a
+// RayInteractable on a clipped plane surface the size of the canvas. Every
+// ISDK reference is injected while the canvas is still inactive, so their
+// Awake/Start see a complete setup.
+//
+// Pressing it runs AIResponseControllerV2.OnBackToHub (the Part Q safe exit).
+public static class BackToHubButton
 {
-    [Tooltip("The scene's AIResponseControllerV2 (on the AI Response Controller " +
-             "GameObject). Used only to read the request lock.")]
-    [SerializeField] private AIResponseControllerV2 aiController;
+    private const string LABEL = "Back to Hub";
 
-    [Tooltip("The Back to Hub Button itself — greyed out while waiting for an " +
-             "in-flight request to finish.")]
-    [SerializeField] private Button backButton;
+    // Canvas units -> metres. The 150x30 button is 0.225 m x 0.045 m and the
+    // 14 pt label about 21 mm tall at 0.9 m (Part T: 25% larger than the
+    // Part S 0.0012; size and label scale together).
+    public const float CANVAS_SCALE = 0.0015f;
+    public static readonly Vector2 CANVAS_SIZE = new Vector2(160f, 40f);
 
-    [SerializeField] private string hubSceneName = "HubScene";
-
-    private const float FAILSAFE_SECONDS = 60f;
-
-    private bool leaving = false;
-
-    public void OnBackToHub()
+    // Why the button cannot be built in this scene, or null when it can.
+    public static string CannotBuildReason(TMP_Text fontSource)
     {
-        if (leaving) return;
-        leaving = true;
-        StartCoroutine(LeaveWhenIdle());
+        if (ReportAnswerButton.LabelFont(fontSource) == null)
+            return "no TMP font (ResponseText has none and TMP_Settings has no default)";
+        if (FindHead() == null) return "no OVRCameraRig CenterEyeAnchor or main camera to follow";
+        return null;
     }
 
-    private IEnumerator LeaveWhenIdle()
+    // Builds the canvas and button. `fontSource` only supplies the font
+    // (ResponseText, else the TMP default). Returns null and builds nothing
+    // when CannotBuildReason is non-null. Always interactable until pressed.
+    public static Button Build(TMP_Text fontSource, Action onClick)
     {
-        if (backButton != null) backButton.interactable = false;
+        if (CannotBuildReason(fontSource) != null) return null;
 
-        if (aiController != null && aiController.IsProcessing)
+        GameObject root = new GameObject("~BackToHubCanvas", typeof(RectTransform));
+        root.SetActive(false); // ISDK references are injected before Awake/Start
+        Canvas canvas = root.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.WorldSpace; // before sizing: screen space drives the rect
+        root.AddComponent<GraphicRaycaster>();
+        RectTransform rootRect = (RectTransform)root.transform;
+        rootRect.sizeDelta = CANVAS_SIZE;
+        rootRect.localScale = Vector3.one * CANVAS_SCALE;
+
+        Button button = ReportAnswerButton.MakeButton(rootRect, ReportAnswerButton.LabelFont(fontSource),
+            "~BackToHub", LABEL, onClick);
+
+        PointableCanvas pointableCanvas = root.AddComponent<PointableCanvas>();
+        pointableCanvas.InjectAllPointableCanvas(canvas);
+
+        GameObject surfaceGo = new GameObject("Surface");
+        surfaceGo.transform.SetParent(root.transform, false);
+        PlaneSurface plane = surfaceGo.AddComponent<PlaneSurface>();
+        plane.InjectAllPlaneSurface(PlaneSurface.NormalFacing.Backward, false);
+        BoundsClipper clipper = surfaceGo.AddComponent<BoundsClipper>();
+        clipper.Size = new Vector3(CANVAS_SIZE.x, CANVAS_SIZE.y, 1f);
+        ClippedPlaneSurface surface = surfaceGo.AddComponent<ClippedPlaneSurface>();
+        surface.InjectAllClippedPlaneSurface(plane, new IBoundsClipper[] { clipper });
+
+        RayInteractable ray = root.AddComponent<RayInteractable>();
+        ray.InjectAllRayInteractable(surface);
+        ray.InjectOptionalPointableElement(pointableCanvas);
+
+        TagAlong follow = root.AddComponent<TagAlong>();
+        follow.Head = FindHead();
+        follow.Snap();
+
+        root.SetActive(true);
+        return button;
+    }
+
+    // The head to follow: the rig's CenterEyeAnchor (its property is set in
+    // the rig's Awake, so the child is looked up by name as a fallback, e.g.
+    // in the Editor check), else the main camera.
+    public static Transform FindHead()
+    {
+        OVRCameraRig rig = UnityEngine.Object.FindObjectOfType<OVRCameraRig>(true);
+        if (rig != null)
         {
-            Debug.Log("[Hub] Back to Hub pressed mid-request — waiting for it to finish.");
-            float deadline = Time.realtimeSinceStartup + FAILSAFE_SECONDS;
-            while (aiController.IsProcessing && Time.realtimeSinceStartup < deadline)
-                yield return null;
-
-            if (aiController.IsProcessing)
-                Debug.LogWarning("[Hub] Request lock still held after failsafe window — leaving anyway.");
+            if (rig.centerEyeAnchor != null) return rig.centerEyeAnchor;
+            Transform eye = rig.transform.Find("TrackingSpace/CenterEyeAnchor");
+            if (eye != null) return eye;
         }
-
-        // Spec 9, item 2: async + faded, same as the hub -> character direction.
-        // The wait-for-the-lock logic above is untouched — this only changes HOW
-        // the load happens once we have decided to leave.
-        SceneTransition.Load(hubSceneName);
+        return Camera.main != null ? Camera.main.transform : null;
     }
 }

@@ -7,6 +7,10 @@ public class AudioRecorder : MonoBehaviour
     private AudioClip recordedClip;
     private string microphoneDevice;
 
+    // Optional device name. Empty (default) or not in Microphone.devices:
+    // RecordAudio() uses Microphone.devices[0] exactly as before.
+    public string PreferredDevice { get; set; } = "";
+
     private int frequency = 16000;
     private int maxDuration = 12;
 
@@ -33,6 +37,8 @@ public class AudioRecorder : MonoBehaviour
     public AudioClip RecordAudio()
     {
         microphoneDevice = Microphone.devices.Length > 0 ? Microphone.devices[0] : null;
+        if (!string.IsNullOrEmpty(PreferredDevice) && System.Array.IndexOf(Microphone.devices, PreferredDevice) >= 0)
+            microphoneDevice = PreferredDevice;
 
         if (microphoneDevice == null)
         {
