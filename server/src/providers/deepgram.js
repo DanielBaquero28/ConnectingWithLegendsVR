@@ -8,16 +8,25 @@
 
 const log = require('../log');
 
+// mip_opt_out=true (spec 12 Part D): opts every request out of Deepgram's
+// Model Improvement Program, so student audio is never used for training.
 const DEEPGRAM_URL =
-  'https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&punctuate=true';
+  'https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&punctuate=true&mip_opt_out=true';
 const TIMEOUT_MS = 15000;
 
-// Returns { ok: true, transcript, audioSeconds } or { ok: false }.
+// Returns { ok: true, transcript, audioSeconds } or { ok: false, timedOut? }.
 // transcript is '' (with ok: true) when Deepgram heard no speech.
-async function transcribe(wavBuffer) {
+// options.deadlineAt (spec 12 Part L): the /converse request deadline; the
+// call's timeout is capped to the time left, and timedOut is set when the
+// deadline — not the provider — ended the attempt.
+async function transcribe(wavBuffer, options) {
   // Estimate duration from the WAV layout (16kHz, 16-bit mono, 44-byte header)
   // as a fallback for metering; prefer Deepgram's own measurement below.
   const estimatedSeconds = Math.max(0, (wavBuffer.length - 44) / (16000 * 2));
+
+  const deadlineAt = options && Number.isFinite(options.deadlineAt) ? options.deadlineAt : Infinity;
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) return { ok: false, timedOut: true };
 
   try {
     const res = await fetch(DEEPGRAM_URL, {
@@ -27,7 +36,7 @@ async function transcribe(wavBuffer) {
         'Content-Type': 'audio/wav',
       },
       body: wavBuffer,
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(Math.min(TIMEOUT_MS, remaining)),
     });
 
     if (!res.ok) {
@@ -50,9 +59,10 @@ async function transcribe(wavBuffer) {
 
     return { ok: true, transcript: transcript.trim(), audioSeconds };
   } catch (err) {
-    log.error('deepgram.failed', { message: err.message });
-    return { ok: false };
+    const timedOut = !!(err && (err.name === 'TimeoutError' || err.name === 'AbortError')) && Date.now() >= deadlineAt;
+    log.error('deepgram.failed', { error: String(err.message || err).slice(0, 200), timedOut });
+    return timedOut ? { ok: false, timedOut: true } : { ok: false };
   }
 }
 
-module.exports = { transcribe };
+module.exports = { transcribe, DEEPGRAM_URL };

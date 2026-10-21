@@ -19,3 +19,5 @@ MonoBehaviour:
   cardTint: {r: 0.29411766, g: 0.18039216, b: 0.14117648, a: 1}
   sceneName: MLKScene
   available: 1
+  networkErrorClip: {fileID: 8300000, guid: 4bf7883b2f6e49f88d2a734121d182dd, type: 3}
+  didntCatchClip: {fileID: 8300000, guid: cd88de0ef7ed43e09d87e3fefc7dd790, type: 3}

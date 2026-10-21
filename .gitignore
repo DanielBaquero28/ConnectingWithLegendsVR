@@ -76,3 +76,8 @@ windy-collector-google.json
 
 # Imported assets
 /[Aa]ssets/University Lecture Theatre/*
+
+
+# Build and compile byproducts
+*_BurstDebugInformation_DoNotShip/
+compile.log

@@ -19,3 +19,5 @@ MonoBehaviour:
   cardTint: {r: 0.13333334, g: 0.1882353, b: 0.33333334, a: 1}
   sceneName: CleopatraScene
   available: 1
+  networkErrorClip: {fileID: 8300000, guid: 2d1460e51c1346229524ba42f47128ac, type: 3}
+  didntCatchClip: {fileID: 8300000, guid: 78e5cb94bed24dcc97cc8c4bf3c795a9, type: 3}

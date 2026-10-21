@@ -16,9 +16,38 @@
 
 const SAMPLE_RATE_HZ = 24000;
 
+// Spec 12 Part C — generative (Chirp) voices are gated. Chirp 3: HD is a
+// generative model with different data terms from the Neural2/Studio/WaveNet
+// families, so no Chirp voice may be seeded, rendered or synthesized unless
+// ALLOW_GENERATIVE_TTS=true is set explicitly. The Chirp handling below
+// (no pitch/rate/SSML) is kept intact for when the flag is on.
+function isGenerativeVoice(voiceName) {
+  return /chirp/i.test(String(voiceName || ''));
+}
+
+// Read at call time (not module load) so the smoke test can flip it, and so a
+// Cloud Run env change needs no code change.
+function generativeTtsAllowed() {
+  return process.env.ALLOW_GENERATIVE_TTS === 'true';
+}
+
+// True when this voice may be used right now; false for a Chirp voice with the
+// flag off. Pure (no throw) for the live path, which must fail soft.
+function isVoiceAllowed(voiceName) {
+  return !isGenerativeVoice(voiceName) || generativeTtsAllowed();
+}
+
+// Throws a clear message for the seed/render path, which must fail LOUDLY.
+function assertVoiceAllowed(voiceName, context) {
+  if (isVoiceAllowed(voiceName)) return;
+  throw new Error(
+    `${context ? context + ': ' : ''}voice "${voiceName}" is a generative (Chirp) voice, ` +
+    'which is disabled. Recast to a Neural2/Studio/WaveNet voice, or set ALLOW_GENERATIVE_TTS=true.');
+}
+
 // False for Chirp voices (no prosody params, no SSML), true for everything else.
 function supportsProsodyParams(voiceName) {
-  return !/chirp/i.test(String(voiceName || ''));
+  return !isGenerativeVoice(voiceName);
 }
 
 // The audioConfig for a character's voice block. For Chirp voices the pitch and
@@ -38,4 +67,12 @@ function buildAudioConfig(voice) {
   return audioConfig;
 }
 
-module.exports = { supportsProsodyParams, buildAudioConfig, SAMPLE_RATE_HZ };
+module.exports = {
+  supportsProsodyParams,
+  buildAudioConfig,
+  isGenerativeVoice,
+  generativeTtsAllowed,
+  isVoiceAllowed,
+  assertVoiceAllowed,
+  SAMPLE_RATE_HZ,
+};

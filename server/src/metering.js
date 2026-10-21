@@ -12,21 +12,31 @@ const log = require('./log');
 const PRICES = {
   // Deepgram Nova-3 pre-recorded: $0.0043/min, billed per second.
   sttPerSecond: 0.0043 / 60,
-  // Gemini, per 1M tokens (tokens estimated as chars/4).
+  // Claude, per 1M tokens, from the provider's reported usage counts (spec 12).
+  // Haiku 5.5 prices are the <=100K-prompt tier; our prompts are far smaller.
   llmPerMTokens: {
-    'gemini-2.5-flash-lite': { input: 0.10, output: 0.40 },
-    'gemini-2.5-flash': { input: 0.30, output: 2.50 },
+    'claude-haiku-5-5': { input: 0.10, output: 0.50 },
+    'claude-sonnet-5-5': { input: 2.00, output: 10.00 },
   },
+  // inference_geo "us" (data residency) is billed at 1.1x on every token category.
+  inferenceGeoMultiplier: { us: 1.1, global: 1.0 },
   // Google TTS Neural2: $16 per 1M characters (cache hits cost $0).
   ttsPerChar: 16 / 1e6,
 };
+const DEFAULT_LLM_MODEL = 'claude-haiku-5-5';
 
-function estimateCostUsd({ modelName, sttSeconds = 0, llmInputChars = 0, llmOutputChars = 0, ttsChars = 0 }) {
-  const llmPrices = PRICES.llmPerMTokens[modelName] || PRICES.llmPerMTokens['gemini-2.5-flash-lite'];
+function isKnownModel(modelName) {
+  return Object.prototype.hasOwnProperty.call(PRICES.llmPerMTokens, modelName);
+}
+
+function estimateCostUsd({
+  modelName, inferenceGeo, sttSeconds = 0, llmInputTokens = 0, llmOutputTokens = 0, ttsChars = 0,
+}) {
+  const llmPrices = PRICES.llmPerMTokens[modelName] || PRICES.llmPerMTokens[DEFAULT_LLM_MODEL];
+  const geoMult = PRICES.inferenceGeoMultiplier[inferenceGeo] || 1.0;
   const sttUsd = sttSeconds * PRICES.sttPerSecond;
   const llmUsd =
-    (llmInputChars / 4 / 1e6) * llmPrices.input +
-    (llmOutputChars / 4 / 1e6) * llmPrices.output;
+    ((llmInputTokens / 1e6) * llmPrices.input + (llmOutputTokens / 1e6) * llmPrices.output) * geoMult;
   const ttsUsd = ttsChars * PRICES.ttsPerChar;
   return sttUsd + llmUsd + ttsUsd;
 }
@@ -71,8 +81,13 @@ async function gate(schoolId) {
 // Transactionally adds this request's usage to the month doc. Returns the
 // request cost plus which budget thresholds were newly crossed (caller fires
 // the Slack alerts after commit).
-async function record({ schoolId, headsetId, monthlyBudgetUsd, modelName, sttSeconds = 0, llmInputChars = 0, llmOutputChars = 0, ttsChars = 0 }) {
-  const costUsd = estimateCostUsd({ modelName, sttSeconds, llmInputChars, llmOutputChars, ttsChars });
+// Cost comes from the provider's token counts; the char counters stay in the
+// usage doc (same shape as before) alongside the new token counters.
+async function record({
+  schoolId, headsetId, monthlyBudgetUsd, modelName, inferenceGeo, sttSeconds = 0,
+  llmInputChars = 0, llmOutputChars = 0, llmInputTokens = 0, llmOutputTokens = 0, ttsChars = 0,
+}) {
+  const costUsd = estimateCostUsd({ modelName, inferenceGeo, sttSeconds, llmInputTokens, llmOutputTokens, ttsChars });
   const month = currentMonth();
   const ref = usageRef(schoolId, month);
   const db = getDb();
@@ -109,6 +124,8 @@ async function record({ schoolId, headsetId, monthlyBudgetUsd, modelName, sttSec
       sttSeconds: (u.sttSeconds || 0) + sttSeconds,
       llmInputChars: (u.llmInputChars || 0) + llmInputChars,
       llmOutputChars: (u.llmOutputChars || 0) + llmOutputChars,
+      llmInputTokens: (u.llmInputTokens || 0) + llmInputTokens,
+      llmOutputTokens: (u.llmOutputTokens || 0) + llmOutputTokens,
       ttsChars: (u.ttsChars || 0) + ttsChars,
       perHeadset,
       thresholdsFired: fired,
@@ -128,4 +145,4 @@ async function getUsage(schoolId, month) {
   return snap.exists ? snap.data() : null;
 }
 
-module.exports = { PRICES, estimateCostUsd, currentMonth, gate, record, getUsage };
+module.exports = { PRICES, DEFAULT_LLM_MODEL, isKnownModel, estimateCostUsd, currentMonth, gate, record, getUsage };
