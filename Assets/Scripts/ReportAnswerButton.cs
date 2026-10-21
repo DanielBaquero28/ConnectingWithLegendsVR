@@ -33,7 +33,8 @@ using UnityEngine.UI;
 // Spec 12 Part Q: the disabled state is visibly greyed (darker, translucent
 // tint and a dimmed label). A Button's ColorBlock only tints its target
 // graphic, so the label is dimmed by SetInteractable — always change
-// interactable through it. BackToHubButton is built by the same code.
+// interactable through it. BackToHubButton uses the same look (MakeButton)
+// but lives on its own canvas (Spec 12 Part S).
 public static class ReportAnswerButton
 {
     private const string LABEL = "Report this answer";
@@ -64,8 +65,8 @@ public static class ReportAnswerButton
         if (label != null) label.color = interactable ? LABEL_NORMAL : LABEL_DISABLED;
     }
 
-    // Why the panel buttons cannot be built for this response text, or null
-    // when they can. Checked before anything is created.
+    // Why the Report button cannot be built for this response text, or null
+    // when it can. Checked before anything is created.
     public static string CannotBuildReason(TMP_Text responseText)
     {
         if (responseText == null) return "ResponseText is not assigned";
@@ -74,28 +75,40 @@ public static class ReportAnswerButton
         return null;
     }
 
-    private static TMP_FontAsset LabelFont(TMP_Text responseText)
+    // The label font: the given text's font, else the TMP default (null when
+    // there is neither).
+    internal static TMP_FontAsset LabelFont(TMP_Text fontSource)
     {
-        return responseText.font != null ? responseText.font : TMP_Settings.defaultFontAsset;
+        return fontSource != null && fontSource.font != null ? fontSource.font : TMP_Settings.defaultFontAsset;
     }
 
-    // Shared by the Report and Back to Hub buttons: a 150x30 button hung just
-    // below the response panel's bottom edge, at its left (cornerX 0) or right
-    // (cornerX 1) corner. Starts interactable.
-    internal static Button BuildPanelButton(TMP_Text responseText, string name, string labelText,
+    // The Report button: hung just below the response panel's bottom-right
+    // corner. Starts interactable (Build disables it).
+    private static Button BuildPanelButton(TMP_Text responseText, string name, string labelText,
         float cornerX, Action onClick)
     {
         if (CannotBuildReason(responseText) != null) return null;
-        RectTransform parent = (RectTransform)responseText.transform.parent;
+        Button button = MakeButton((RectTransform)responseText.transform.parent,
+            LabelFont(responseText), name, labelText, onClick);
 
+        RectTransform rect = (RectTransform)button.transform;
+        rect.anchorMin = rect.anchorMax = new Vector2(cornerX, 0f);
+        rect.pivot = new Vector2(cornerX, 1f);
+        rect.anchoredPosition = new Vector2(0f, -6f);
+        rect.SetAsLastSibling();
+        return button;
+    }
+
+    // Shared by the Report and Back to Hub buttons: a 150x30 button with this
+    // look, centred in `parent` (callers move it). `font` must not be null.
+    // Starts interactable.
+    internal static Button MakeButton(RectTransform parent, TMP_FontAsset font, string name,
+        string labelText, Action onClick)
+    {
         GameObject go = new GameObject(name, typeof(RectTransform));
         RectTransform rect = (RectTransform)go.transform;
         rect.SetParent(parent, false);
-        rect.anchorMin = rect.anchorMax = new Vector2(cornerX, 0f);
-        rect.pivot = new Vector2(cornerX, 1f);
         rect.sizeDelta = new Vector2(150f, 30f);
-        rect.anchoredPosition = new Vector2(0f, -6f);
-        rect.SetAsLastSibling();
 
         Image image = go.AddComponent<Image>();
         image.color = NORMAL;
@@ -117,10 +130,10 @@ public static class ReportAnswerButton
         labelRect.anchorMin = Vector2.zero;
         labelRect.anchorMax = Vector2.one;
         labelRect.offsetMin = labelRect.offsetMax = Vector2.zero;
-        // Font first and explicitly: on the inactive canvas this label has not
+        // Font first and explicitly: on an inactive canvas this label has not
         // run Awake, so TMP has not given it a default font (see the header).
         TextMeshProUGUI label = labelGo.AddComponent<TextMeshProUGUI>();
-        label.font = LabelFont(responseText);
+        label.font = font;
         label.fontSize = 14f;
         label.text = labelText;
         label.fontStyle = FontStyles.Normal;

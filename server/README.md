@@ -577,6 +577,15 @@ logs and the error handler, not by the request log.
 - Re-render the intro WAV for any recast character
   (`scripts/render-speech-wav.js`); crisis WAVs are out of scope for spec 12.
 
+## Live revisions
+
+| Date | Revision | What changed | Rollback target |
+|---|---|---|---|
+| 2026-10-15 | `hsvr-proxy-00007-zel` | Spec 12 cutover (Claude) | `hsvr-proxy-00006-gj6` |
+| 2026-10-21 | **`hsvr-proxy-00010-nac`** (live, 100%) | Spec 12 Part Q turn suffix (personal-details rule) + Part R personal-detail guard; deployed tagged `partr`, `/status` checked, tag removed | **`hsvr-proxy-00007-zel`** |
+
+Rollback: `gcloud run services update-traffic hsvr-proxy --region us-east1 --to-revisions hsvr-proxy-00007-zel=100`
+
 ## Operational notes
 
 - **Costs are estimates** for monitoring, not billing-grade. Prices live in
