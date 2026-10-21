@@ -18,6 +18,9 @@ public class VoiceRecognitionController : MonoBehaviour
     // so the existing lock always wins. Set from SetButtonsInteractable.
     private bool buttonsLocked = false;
 
+    // Spec 12 Part Q: set once on Back to Hub; Record does nothing after it.
+    private bool exiting = false;
+
     // Spec 12 Part P: false while Android's microphone permission is denied.
     // Re-read at Start and whenever the app regains focus (the student may have
     // just enabled it in Settings). Always true in the Editor.
@@ -76,7 +79,10 @@ public class VoiceRecognitionController : MonoBehaviour
         // empty transcript) hides it exactly once. Crisis and safety redirects
         // never start a request, so they never show it in the first place.
         if (aiController != null)
+        {
             aiController.ProcessingChanged += OnProcessingChanged;
+            aiController.ExitRequested += OnExitRequested;
+        }
 
         // Spec 12 Part P: the hub asked for the permission; here we only read it.
         if (RecordButton != null)
@@ -115,7 +121,27 @@ public class VoiceRecognitionController : MonoBehaviour
             RecordButton.onClick.RemoveListener(StartRecording);
 
         if (aiController != null)
+        {
             aiController.ProcessingChanged -= OnProcessingChanged;
+            aiController.ExitRequested -= OnExitRequested;
+        }
+    }
+
+    // Spec 12 Part Q: Back to Hub. Stops the voice side for good: the
+    // microphone, ProcessRecordingNow and the voice-path converse coroutine it
+    // waits on (both run on this component). A stopped coroutine skips its
+    // finally, so the recorded WAV is deleted here instead. The AI controller
+    // releases the request lock right after this returns.
+    private void OnExitRequested()
+    {
+        exiting = true;
+        StopAllCoroutines();
+        if (recording && audioRecorder != null) audioRecorder.StopRecording();
+        recording = false;
+        processingInProgress = false;
+        AudioPromptCleanup.DeleteQuietly(AudioPromptCleanup.FilePath, "left for hub");
+        SetButtonsInteractable(false);
+        if (CountdownText != null) CountdownText.gameObject.SetActive(false);
     }
 
     // ---- Spec 8, item 2: the single source of truth for the processing indicator ----
@@ -146,6 +172,8 @@ public class VoiceRecognitionController : MonoBehaviour
 
     public void StartRecording()
     {
+        if (exiting) return; // Spec 12 Part Q: leaving for the hub
+
         if (!micAvailable)
         {
             Debug.LogWarning("[Voice] Record ignored: microphone permission is off.");

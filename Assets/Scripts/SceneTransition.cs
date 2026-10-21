@@ -52,7 +52,7 @@ public static class SceneTransition
 
         // A scene load is irreversible, so a second request mid-transition can only
         // do harm. Callers latch too (HubController.loadingScene,
-        // BackToHubButton.leaving); this is the backstop that makes the guarantee
+        // AIResponseControllerV2.exiting); this is the backstop that makes the guarantee
         // hold no matter who calls.
         if (IsTransitioning)
         {

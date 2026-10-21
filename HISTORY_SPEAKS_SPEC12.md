@@ -241,3 +241,19 @@ Acceptance: at most 5 of 70 replies over 50 words raw, zero meta leaks, zero ide
 
 If it passes, start the cutover: execute the README runbook one step at a time, showing each command before running it and waiting for an OK. Never print secret values. Stop before switching traffic so the tagged revision's smoke results can be reviewed.
 
+---
+
+## Part Q — Quest test fixes
+
+1. **Back to Hub.** First report what navigation exists today (any button, controller binding or timeout). Then add a visible "Back to Hub" button to the conversation UI in every character scene, built the same way as the Report button. It must be safe mid-request: stop audio and coroutines, release the request lock, and ignore any late server response, then load the hub.
+2. **Hub welcome panel.** On each app launch (not on every return to the hub), show a short panel: "Welcome to History Speaks. Pick a figure from history and talk with them. Point at Record, speak your question, and wait for the answer — or type it. These are AI recreations for learning." Add a "Start" button. Same input blocking as the disclosure panel.
+3. **Disclosure panel:** about 30% smaller, text still readable on the Quest.
+4. **Report button:**
+   - When not interactable, it must look clearly disabled (greyed tint, dimmed label).
+   - Input was seen locked around a report: after pressing it, the text couldn't be edited and Record didn't work. Check whether `/report` or the button touches the request lock, the input field or the Record button, fix the cause, and explain what it was.
+5. **Personal info:** extend the user-turn suffix: "…ending with a short question when natural. Never repeat names, schools or other personal details the student mentions." Keep the preamble rule. Request-only, never stored. Add a smoke assertion.
+6. **Pre-recorded fallback lines** for the five scene characters (Einstein, MLK, Cleopatra, Caesar, Lincoln):
+   - Render with the existing render script and each character's current seed voice: the network-error line (the existing text) and "I didn't quite catch that — please try again." Read the TTS key the same no-echo way as before.
+   - Store the clips next to the crisis clips, add fields for them on the per-character asset and wire them up, and play them whenever those lines are shown. Text stays as now.
+
+Don't deploy anything; this is all Unity plus the request-builder change. Item 5 changes the server, so give the deploy command for it separately, without running it. Compile with `-buildTarget Android`, run the smoke test, and commit.

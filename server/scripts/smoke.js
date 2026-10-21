@@ -445,6 +445,12 @@ async function main() {
     // Spec 12 Part O: the length rule rides on the current user turn only.
     assert.deepEqual(last, { role: 'user', content: 'What is light?' + claude.TURN_SUFFIX });
     assert.ok(/at most 40 words/.test(claude.TURN_SUFFIX));
+    // Spec 12 Part Q: the personal-details rule rides on the current turn,
+    // and the Part K preamble rule is still there.
+    assert.ok(claude.TURN_SUFFIX.includes('Never repeat names, schools or other personal details the student mentions.'),
+      'the turn suffix carries the personal-details rule');
+    assert.ok(body.system.includes('If a student volunteers such details, do not repeat them'),
+      'the SAFETY_PREAMBLE personal-information rule is kept');
     for (let i = 1; i < body.messages.length; i++) {
       assert.notEqual(body.messages[i].role, body.messages[i - 1].role, 'strict alternation');
     }
@@ -463,6 +469,7 @@ async function main() {
     assert.deepEqual(messages[n - 1], { role: 'user', content: 'And what is time?' + claude.TURN_SUFFIX });
     const stored = fakeDb.docs.get(`sessions/${sid}`);
     assert.ok(!JSON.stringify(stored).includes('at most 40 words'), 'the suffix is never stored in session history');
+    assert.ok(!JSON.stringify(stored).includes('Never repeat names'), 'the personal-details rule is never stored in session history');
     for (const m of messages) assert.equal(typeof m.content, 'string', 'history is plain text');
     assert.ok(!JSON.stringify(messages).includes('"role":"model"'), 'stored "model" role is mapped to assistant');
   });

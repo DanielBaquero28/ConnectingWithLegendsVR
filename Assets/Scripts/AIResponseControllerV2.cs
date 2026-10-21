@@ -66,6 +66,22 @@ public class AIResponseControllerV2 : MonoBehaviour
     private UnityEngine.UI.Button reportButton;
     private Coroutine reportArmRoutine;
 
+    // Spec 12 Part Q: "Back to Hub", built in code next to the report button.
+    // `exiting` is one-way: once set, no new request starts and nothing that
+    // is still unwinding (a late server response, a network-error line) is
+    // shown. `converseRoutine` is the typed-path request coroutine, the only
+    // converse coroutine that runs on this component (the voice path's runs on
+    // VoiceRecognitionController, which stops it on ExitRequested).
+    private const string HUB_SCENE = "HubScene";
+    private UnityEngine.UI.Button backButton;
+    private bool exiting = false;
+    private Coroutine converseRoutine;
+
+    // Raised once when the student presses Back to Hub, before the request
+    // lock is released. VoiceRecognitionController stops recording and its
+    // own coroutines on it.
+    public event System.Action ExitRequested;
+
     private void RaiseProcessing(bool value)
     {
         if (value) DisarmReportButton();
@@ -98,9 +114,50 @@ public class AIResponseControllerV2 : MonoBehaviour
             reportButton = ReportAnswerButton.Build(ResponseText.transform.parent, OnReportAnswer);
             if (reportButton == null)
                 Debug.LogWarning("[AI] Report button could not be built (no response panel RectTransform or TMP font).");
+
+            backButton = BackToHubButton.Build(ResponseText.transform.parent, OnBackToHub);
+            if (backButton == null)
+                Debug.LogWarning("[AI] Back to Hub button could not be built (no response panel RectTransform or TMP font).");
         }
 
         Debug.Log($"--- CONNECTION STARTED: proxy session {sessionId} ---");
+    }
+
+    // Spec 12 Part Q: leave for the hub at once, even mid-request. Order:
+    // voice side stops (recording, its coroutines, the WAV), the typed request
+    // coroutine stops, the in-flight /converse is aborted (ProxyClient drops
+    // its response without calling back), the character stops talking, the
+    // lock is released, then the hub loads. Coroutines stopped this way skip
+    // their finally blocks, which is why the lock is released here by hand.
+    // Fire-and-forget metadata posts (/report, /crisis-report) are left
+    // running; they die with the scene as before.
+    private void OnBackToHub()
+    {
+        if (exiting) return;
+        exiting = true;
+        ReportAnswerButton.SetInteractable(backButton, false);
+        Debug.Log("[AI] Back to Hub pressed" + (isProcessing ? " mid-request; cancelling it." : "."));
+
+        ExitRequested?.Invoke();
+
+        if (converseRoutine != null)
+        {
+            StopCoroutine(converseRoutine);
+            converseRoutine = null;
+        }
+        if (proxyClient != null) proxyClient.AbortConverse();
+
+        DisarmReportButton();
+        AudioSource source = ResolveAudioSource();
+        if (source != null) source.Stop();
+
+        if (isProcessing)
+        {
+            isProcessing = false;
+            RaiseProcessing(false);
+        }
+
+        SceneTransition.Load(HUB_SCENE);
     }
 
     // Spec 12 Part M: one press -> one metadata-only POST /report, outside the
@@ -121,7 +178,7 @@ public class AIResponseControllerV2 : MonoBehaviour
             StopCoroutine(reportArmRoutine);
             reportArmRoutine = null;
         }
-        if (reportButton != null) reportButton.interactable = false;
+        ReportAnswerButton.SetInteractable(reportButton, false);
     }
 
     // Arms the button once the reply has been heard: after the AudioSource
@@ -135,11 +192,13 @@ public class AIResponseControllerV2 : MonoBehaviour
             while (source != null && source.isPlaying) yield return null;
         }
         reportArmRoutine = null;
-        if (reportButton != null) reportButton.interactable = true;
+        ReportAnswerButton.SetInteractable(reportButton, true);
     }
 
     public void OnSubmit()
     {
+        if (exiting) return; // Spec 12 Part Q: leaving for the hub
+
         // Drop duplicates while a request is in flight.
         if (isProcessing)
         {
@@ -176,7 +235,7 @@ public class AIResponseControllerV2 : MonoBehaviour
             return;
         }
 
-        StartCoroutine(ConverseTextRoutine(text));
+        converseRoutine = StartCoroutine(ConverseTextRoutine(text));
     }
 
     private IEnumerator ConverseTextRoutine(string prompt)
@@ -195,10 +254,13 @@ public class AIResponseControllerV2 : MonoBehaviour
             yield return StartCoroutine(proxyClient.ConverseWithText(
                 prompt, sessionId, r => response = r, () => failed = true));
 
+            if (exiting) yield break; // Spec 12 Part Q: late result after Back to Hub
+
             if (failed || response == null)
             {
                 // Final failure: in-character network line; field NOT cleared.
                 ResponseText.text = NETWORK_ERROR;
+                PlayFallbackLine(NetworkErrorClip);
                 yield break;
             }
 
@@ -209,6 +271,7 @@ public class AIResponseControllerV2 : MonoBehaviour
             // Release the lock no matter how we exited.
             isProcessing = false;
             RaiseProcessing(false);
+            converseRoutine = null;
         }
     }
 
@@ -217,6 +280,8 @@ public class AIResponseControllerV2 : MonoBehaviour
     // session ID stay in one place.
     public IEnumerator ConverseFromVoiceWav(string wavPath)
     {
+        if (exiting) yield break; // Spec 12 Part Q: leaving for the hub
+
         // Drop duplicates while a request is in flight (e.g. a voice result
         // arriving mid-request).
         if (isProcessing)
@@ -235,9 +300,12 @@ public class AIResponseControllerV2 : MonoBehaviour
             yield return StartCoroutine(proxyClient.ConverseWithAudio(
                 wavPath, sessionId, r => response = r, () => failed = true));
 
+            if (exiting) yield break; // Spec 12 Part Q: late result after Back to Hub
+
             if (failed || response == null)
             {
                 ResponseText.text = NETWORK_ERROR;
+                PlayFallbackLine(NetworkErrorClip);
                 yield break;
             }
 
@@ -249,6 +317,7 @@ public class AIResponseControllerV2 : MonoBehaviour
                 // voice controller re-enables buttons.
                 Debug.LogWarning("[AI] Empty transcript from proxy (didn't catch that).");
                 ResponseText.text = EMPTY_TRANSCRIPT;
+                PlayFallbackLine(DidntCatchClip);
                 yield break;
             }
 
@@ -291,6 +360,31 @@ public class AIResponseControllerV2 : MonoBehaviour
         AudioSource source = ResolveAudioSource();
         if (source == null) return;
         source.clip = crisisVoiceClip;
+        source.Play();
+    }
+
+    // Spec 12 Part Q: pre-rendered recordings of NETWORK_ERROR and
+    // EMPTY_TRANSCRIPT in the character's voice, from the hub selection's
+    // CharacterDefinition. A direct Editor launch has no selection, so those
+    // lines stay text-only there, as does a character with no clip assigned.
+    private static AudioClip NetworkErrorClip
+    {
+        get { return CharacterSession.Current != null ? CharacterSession.Current.networkErrorClip : null; }
+    }
+
+    private static AudioClip DidntCatchClip
+    {
+        get { return CharacterSession.Current != null ? CharacterSession.Current.didntCatchClip : null; }
+    }
+
+    // Plays through the reply AudioSource, so SALSA lip-syncs it like a reply.
+    private void PlayFallbackLine(AudioClip clip)
+    {
+        if (clip == null) return;
+        AudioSource source = ResolveAudioSource();
+        if (source == null) return;
+        source.Stop();
+        source.clip = clip;
         source.Play();
     }
 

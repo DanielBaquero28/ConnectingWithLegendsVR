@@ -66,6 +66,9 @@ public class HubController : MonoBehaviour
                 () => OnCharacterSelected(captured));
             card.gameObject.SetActive(true);
         }
+
+        // Spec 12 Part Q: once per app launch, over the cards just built.
+        HubWelcomePanel.ShowOncePerLaunch(cardTemplate.GetComponentInParent<Canvas>(true));
     }
 
     // Priority: definition's portrait field (manual override) > atlas sprite

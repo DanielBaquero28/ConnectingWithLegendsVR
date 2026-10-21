@@ -1,58 +1,27 @@
-using System.Collections;
+using System;
 using UnityEngine;
 using UnityEngine.UI;
 
-// "Back to Hub" (Spec 7). Scene component on the character scene's world-space
-// button. Wire the Button's OnClick to OnBackToHub().
+// Spec 12 Part Q — the "Back to Hub" button in the conversation UI.
 //
-// Ends the conversation cleanly: if a /converse request is in flight
-// (aiController.IsProcessing), it waits for the lock to release before
-// loading HubScene, so no request is left dangling when the scene — and the
-// coroutines driving the request — are destroyed. ProxyClient's worst case is
-// ~47s (3 attempts x 15s timeout + backoff); the 60s failsafe below only
-// fires if the lock is somehow stuck beyond that, rather than trapping the
-// student in the scene forever.
-public class BackToHubButton : MonoBehaviour
+// Built in code exactly like the Report button (same size and look, see
+// ReportAnswerButton.BuildPanelButton), hung below the response panel's
+// bottom-LEFT corner so the two sit at opposite ends of the same edge. Every
+// character scene gets it from AIResponseControllerV2.Start with no
+// Inspector wiring.
+//
+// This replaces the Spec 7 scene component of the same name, which was never
+// placed in any scene. That version waited up to 60 s for an in-flight
+// request to finish; this one leaves at once and cancels the request instead
+// (AIResponseControllerV2.OnBackToHub owns that sequence).
+public static class BackToHubButton
 {
-    [Tooltip("The scene's AIResponseControllerV2 (on the AI Response Controller " +
-             "GameObject). Used only to read the request lock.")]
-    [SerializeField] private AIResponseControllerV2 aiController;
+    private const string LABEL = "Back to Hub";
 
-    [Tooltip("The Back to Hub Button itself — greyed out while waiting for an " +
-             "in-flight request to finish.")]
-    [SerializeField] private Button backButton;
-
-    [SerializeField] private string hubSceneName = "HubScene";
-
-    private const float FAILSAFE_SECONDS = 60f;
-
-    private bool leaving = false;
-
-    public void OnBackToHub()
+    // Returns null (and builds nothing) when there is no RectTransform or no
+    // TMP default font. Always interactable until pressed.
+    public static Button Build(Transform anchor, Action onClick)
     {
-        if (leaving) return;
-        leaving = true;
-        StartCoroutine(LeaveWhenIdle());
-    }
-
-    private IEnumerator LeaveWhenIdle()
-    {
-        if (backButton != null) backButton.interactable = false;
-
-        if (aiController != null && aiController.IsProcessing)
-        {
-            Debug.Log("[Hub] Back to Hub pressed mid-request — waiting for it to finish.");
-            float deadline = Time.realtimeSinceStartup + FAILSAFE_SECONDS;
-            while (aiController.IsProcessing && Time.realtimeSinceStartup < deadline)
-                yield return null;
-
-            if (aiController.IsProcessing)
-                Debug.LogWarning("[Hub] Request lock still held after failsafe window — leaving anyway.");
-        }
-
-        // Spec 9, item 2: async + faded, same as the hub -> character direction.
-        // The wait-for-the-lock logic above is untouched — this only changes HOW
-        // the load happens once we have decided to leave.
-        SceneTransition.Load(hubSceneName);
+        return ReportAnswerButton.BuildPanelButton(anchor, "~BackToHub", LABEL, 0f, onClick);
     }
 }

@@ -49,40 +49,24 @@ public static class AiDisclosurePanel
         if (canvas == null) return false;
         if (current != null) Destroy();
 
-        Canvas root = canvas.rootCanvas != null ? canvas.rootCanvas : canvas;
-        RectTransform canvasRect = root.GetComponent<RectTransform>();
-        if (canvasRect == null) return false;
-
-        // --- backdrop: fills the canvas, swallows pointer events ---
-        current = new GameObject("~AiDisclosure", typeof(RectTransform));
-        RectTransform rect = (RectTransform)current.transform;
-        rect.SetParent(canvasRect, false);
-        rect.anchorMin = Vector2.zero;
-        rect.anchorMax = Vector2.one;
-        rect.offsetMin = Vector2.zero;
-        rect.offsetMax = Vector2.zero;
-        rect.SetAsLastSibling();
-
-        Image backdrop = current.AddComponent<Image>();
-        backdrop.color = BACKDROP;
-        backdrop.raycastTarget = true;
-
-        // --- card ---
-        float w = Mathf.Min(canvasRect.rect.width * 0.72f, 820f);
-        float h = Mathf.Min(canvasRect.rect.height * 0.62f, 380f);
-        RectTransform card = MakeRect("Card", rect, new Vector2(w, h), Vector2.zero);
-        Image cardImage = card.gameObject.AddComponent<Image>();
-        cardImage.color = CARD;
-        cardImage.raycastTarget = true;
+        // Spec 12 Part Q: the card is 70% of its original size (it was
+        // min(72% x 62% of the canvas, 820 x 380)). Text shrinks less than the
+        // card — the body is still larger than the hub card names (14) —
+        // so it stays readable on the Quest.
+        RectTransform card;
+        current = BuildBackdropAndCard(canvas, "~AiDisclosure", out card);
+        if (current == null) return false;
+        float w = card.sizeDelta.x;
+        float h = card.sizeDelta.y;
 
         // --- title + body ---
-        TMP_Text title = MakeText("Title", card, new Vector2(w - 60f, 60f), new Vector2(0f, h * 0.5f - 60f),
-            TITLE, 34f, FontStyles.Bold);
-        TMP_Text body = MakeText("Body", card, new Vector2(w - 80f, h - 230f), new Vector2(0f, 30f),
+        TMP_Text title = MakeText("Title", card, new Vector2(w - 40f, 40f), new Vector2(0f, h * 0.5f - 36f),
+            TITLE, 24f, FontStyles.Bold);
+        TMP_Text body = MakeText("Body", card, new Vector2(w - 56f, h - 154f), new Vector2(0f, 16f),
             string.Format(BODY_FORMAT, string.IsNullOrEmpty(displayName) ? "this historical figure" : displayName),
-            26f, FontStyles.Normal);
-        TMP_Text age = MakeText("Age", card, new Vector2(w - 80f, 40f), new Vector2(0f, -h * 0.5f + 120f),
-            AGE_LINE, 22f, FontStyles.Italic);
+            19f, FontStyles.Normal);
+        TMP_Text age = MakeText("Age", card, new Vector2(w - 56f, 26f), new Vector2(0f, -h * 0.5f + 77f),
+            AGE_LINE, 16f, FontStyles.Italic);
         if (title == null || body == null || age == null)
         {
             // No TMP default font: we cannot show the words, so do not pretend
@@ -93,21 +77,7 @@ public static class AiDisclosurePanel
         }
 
         // --- Continue button ---
-        RectTransform buttonRect = MakeRect("Continue", card, new Vector2(260f, 64f), new Vector2(0f, -h * 0.5f + 60f));
-        Image buttonImage = buttonRect.gameObject.AddComponent<Image>();
-        buttonImage.color = BUTTON;
-        buttonImage.raycastTarget = true;
-
-        Button button = buttonRect.gameObject.AddComponent<Button>();
-        button.targetGraphic = buttonImage;
-        ColorBlock colors = button.colors;
-        colors.normalColor = BUTTON;
-        colors.highlightedColor = BUTTON_HOVER;
-        colors.pressedColor = BUTTON_PRESSED;
-        colors.selectedColor = BUTTON;
-        button.colors = colors;
-
-        MakeText("Label", buttonRect, new Vector2(240f, 56f), Vector2.zero, CONTINUE_LABEL, 28f, FontStyles.Bold);
+        Button button = MakePrimaryButton(card, CONTINUE_LABEL, new Vector2(0f, -h * 0.5f + 36f));
 
         bool fired = false; // ray + click double-trigger guard, same as the hub cards
         button.onClick.AddListener(() =>
@@ -133,7 +103,64 @@ public static class AiDisclosurePanel
         current = null;
     }
 
-    private static RectTransform MakeRect(string name, RectTransform parent, Vector2 size, Vector2 position)
+    // ----- Shared with HubWelcomePanel (Spec 12 Part Q) -----
+
+    // A full-canvas backdrop that swallows pointer events, as the last sibling
+    // of the root canvas, with a centred card on it. Returns the backdrop
+    // (destroy it to remove the panel), or null if there is no canvas rect.
+    internal static GameObject BuildBackdropAndCard(Canvas canvas, string name, out RectTransform card)
+    {
+        card = null;
+        Canvas root = canvas.rootCanvas != null ? canvas.rootCanvas : canvas;
+        RectTransform canvasRect = root.GetComponent<RectTransform>();
+        if (canvasRect == null) return null;
+
+        // --- backdrop: fills the canvas, swallows pointer events ---
+        GameObject backdropGo = new GameObject(name, typeof(RectTransform));
+        RectTransform rect = (RectTransform)backdropGo.transform;
+        rect.SetParent(canvasRect, false);
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+        rect.SetAsLastSibling();
+
+        Image backdrop = backdropGo.AddComponent<Image>();
+        backdrop.color = BACKDROP;
+        backdrop.raycastTarget = true;
+
+        // --- card ---
+        float w = Mathf.Min(canvasRect.rect.width * 0.50f, 575f);
+        float h = Mathf.Min(canvasRect.rect.height * 0.43f, 266f);
+        card = MakeRect("Card", rect, new Vector2(w, h), Vector2.zero);
+        Image cardImage = card.gameObject.AddComponent<Image>();
+        cardImage.color = CARD;
+        cardImage.raycastTarget = true;
+        return backdropGo;
+    }
+
+    // The blue Continue/Start button. Caller adds its own onClick listener.
+    internal static Button MakePrimaryButton(RectTransform card, string label, Vector2 position)
+    {
+        RectTransform buttonRect = MakeRect(label, card, new Vector2(182f, 45f), position);
+        Image buttonImage = buttonRect.gameObject.AddComponent<Image>();
+        buttonImage.color = BUTTON;
+        buttonImage.raycastTarget = true;
+
+        Button button = buttonRect.gameObject.AddComponent<Button>();
+        button.targetGraphic = buttonImage;
+        ColorBlock colors = button.colors;
+        colors.normalColor = BUTTON;
+        colors.highlightedColor = BUTTON_HOVER;
+        colors.pressedColor = BUTTON_PRESSED;
+        colors.selectedColor = BUTTON;
+        button.colors = colors;
+
+        MakeText("Label", buttonRect, new Vector2(168f, 39f), Vector2.zero, label, 20f, FontStyles.Bold);
+        return button;
+    }
+
+    internal static RectTransform MakeRect(string name, RectTransform parent, Vector2 size, Vector2 position)
     {
         GameObject go = new GameObject(name, typeof(RectTransform));
         RectTransform r = (RectTransform)go.transform;
@@ -146,7 +173,7 @@ public static class AiDisclosurePanel
     }
 
     // Returns null when TMP has no default font (the text would be invisible).
-    private static TMP_Text MakeText(string name, RectTransform parent, Vector2 size, Vector2 position,
+    internal static TMP_Text MakeText(string name, RectTransform parent, Vector2 size, Vector2 position,
         string text, float fontSize, FontStyles style)
     {
         RectTransform r = MakeRect(name, parent, size, position);

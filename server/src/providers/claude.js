@@ -49,8 +49,11 @@ const MAX_TOKENS = 600; // thinking tokens count against this too
 // (Part N re-run: 49/70 replies over 40 words). Appended in the request body
 // only — sessions.js stores the student's text as sent, never this suffix,
 // so history turns resent on later requests do not carry it.
+// Spec 12 Part Q: the no-repeat rule for personal details rides along too
+// (the SAFETY_PREAMBLE rule from Part K stays as well).
 const TURN_SUFFIX =
-  ' (Reply in at most 40 words, in two or three sentences, ending with a short question when natural.)';
+  ' (Reply in at most 40 words, in two or three sentences, ending with a short question when natural.' +
+  ' Never repeat names, schools or other personal details the student mentions.)';
 
 const MAX_ATTEMPTS = 3;
 const ATTEMPT_TIMEOUT_MS = 15000;

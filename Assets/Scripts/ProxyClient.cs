@@ -90,6 +90,20 @@ public class ProxyClient : MonoBehaviour
     private const int METADATA_POST_ATTEMPTS = 3;
     private const int METADATA_POST_TIMEOUT_SECONDS = 5;
 
+    // Spec 12 Part Q: Back to Hub mid-request. AbortConverse() aborts the
+    // /converse attempt in flight and makes SendWithRetries return without
+    // calling onDone or onFail, so a late server response is never shown.
+    // One-way: the scene is being left, so it is never reset. The metadata
+    // posts are not affected.
+    private UnityWebRequest inFlightConverse;
+    private bool converseAborted = false;
+
+    public void AbortConverse()
+    {
+        converseAborted = true;
+        if (inFlightConverse != null) inFlightConverse.Abort();
+    }
+
     private void Awake()
     {
 #if UNITY_EDITOR
@@ -264,13 +278,25 @@ public class ProxyClient : MonoBehaviour
 
         for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++)
         {
+            if (converseAborted) yield break; // left the scene during a backoff wait
+
             UnityWebRequest request = buildRequest();
 
             if (verboseLogging)
                 Debug.Log($"[ProxyClient] Attempt {attempt + 1}/{MAX_ATTEMPTS} POST {request.url} " +
                           $"(deviceToken length: {(deviceToken != null ? deviceToken.Length : 0)})");
 
+            inFlightConverse = request;
             yield return request.SendWebRequest();
+            inFlightConverse = null;
+
+            if (converseAborted)
+            {
+                // Spec 12 Part Q: Back to Hub. Whatever came back is dropped.
+                Debug.Log("[Proxy] /converse abandoned (leaving the scene); response ignored.");
+                request.Dispose();
+                yield break;
+            }
 
             if (verboseLogging)
             {
