@@ -556,6 +556,78 @@ async function main() {
     }
   });
 
+  // --- spec 12 Part R: personal-detail guard ---
+  // Each test runs a fresh session and spies on the text sent to TTS.
+  const personalDetails = require('../src/personalDetails');
+  async function converseCapturingTts(sessionId, text) {
+    const ttsTexts = [];
+    const mocked = googleTts.synthesize;
+    googleTts.synthesize = async (t, ...rest) => { ttsTexts.push(t); return mocked(t, ...rest); };
+    try {
+      const res = await postJson('/converse', auth, { sessionId, text });
+      assert.equal(res.status, 200);
+      return { body: await res.json(), ttsTexts };
+    } finally {
+      googleTts.synthesize = mocked;
+    }
+  }
+  const lastModelTurn = (sessionId) =>
+    fakeDb.docs.get(`sessions/${sessionId}`).turns.filter((t) => t.role === 'model').pop().text;
+  const docsOutsideSessions = () =>
+    JSON.stringify([...fakeDb.docs.entries()].filter(([k]) => !k.startsWith('sessions/')));
+
+  await test('a name the student gives is removed from the reply before TTS and storage, and stored nowhere new', async () => {
+    const psid = 'a1b2c3d4-0000-4000-8000-0000000000e1';
+    anthropicBehavior = () => claudeReply('I’m glad to meet you, Daniel.');
+    try {
+      const { body, ttsTexts } = await converseCapturingTts(psid, 'Hello! My name is Daniel.');
+      assert.equal(body.replyText, 'I’m glad to meet you.');
+      assert.deepEqual(ttsTexts, ['I’m glad to meet you.'], 'TTS never hears the name');
+      assert.equal(lastModelTurn(psid), 'I’m glad to meet you.', 'the stored reply has no name');
+      assert.ok(!docsOutsideSessions().includes('Daniel'), 'the name is not written to events, usage or anything else');
+    } finally {
+      resetAnthropic();
+    }
+  });
+
+  await test('a school from an EARLIER turn is removed (with its preposition) and the punctuation is tidied', async () => {
+    const psid = 'a1b2c3d4-0000-4000-8000-0000000000e2';
+    await converseCapturingTts(psid, 'I go to Westside High School.');
+    anthropicBehavior = () =>
+      claudeReply('Westside High School sounds lively! School in Munich was strict, unlike at Westside today.');
+    try {
+      const { body, ttsTexts } = await converseCapturingTts(psid, 'What was school like for you?');
+      assert.equal(body.replyText, 'Sounds lively! School in Munich was strict, unlike today.');
+      assert.deepEqual(ttsTexts, [body.replyText]);
+      assert.equal(lastModelTurn(psid), body.replyText);
+      assert.ok(!docsOutsideSessions().includes('Westside'), 'the school is not written anywhere new');
+    } finally {
+      resetAnthropic();
+    }
+  });
+
+  await test('no false positives: history words and generic words survive; questions without a trigger extract nothing', async () => {
+    const psid = 'a1b2c3d4-0000-4000-8000-0000000000e3';
+    await converseCapturingTts(psid, 'My name is Daniel and I live in New York. I go to the library every day.');
+    const HISTORY = 'The New Deal and the Great Depression shaped the United States, and the Library of Congress kept the record. ' +
+      'What else?';
+    anthropicBehavior = () => claudeReply(HISTORY);
+    try {
+      const { body } = await converseCapturingTts(psid, 'Tell me about the 1930s.');
+      assert.equal(body.replyText, HISTORY, 'generic words ("New", "Great", "Library") are never removed alone');
+    } finally {
+      resetAnthropic();
+    }
+    // The character's own name is protected even when the student shares it.
+    const lincoln = personalDetails.scrubReply('I am Abraham Lincoln. What do you study at Lincoln High?',
+      personalDetails.extractDetails(['my school is lincoln high']), ['Abraham Lincoln', 'lincoln']);
+    assert.equal(lincoln.text, 'I am Abraham Lincoln. What do you study?');
+    for (const q of ['What was the name of your school?', 'Where did you live in 1905?',
+      'Who called you a genius?', 'Why did Caesar go to Gaul?', 'Is my name in history books?']) {
+      assert.deepEqual(personalDetails.extractDetails([q]), [], `no detail in "${q}"`);
+    }
+  });
+
   // --- spec 12 Part N: reasoning-leak guard ---
   await test('a reply that leaks reasoning is retried once; the retry ships and one reply_meta_leak event (no text) is written', async () => {
     const LEAK = 'The student sincerely asks whether I am an AI. I should answer honestly, then continue in character.';

@@ -61,8 +61,9 @@ public class AIResponseControllerV2 : MonoBehaviour
     // Spec 12 Part M: "Report this answer". Built in code under the response
     // panel (see ReportAnswerButton). Enabled only once a character reply has
     // finished playing; disabled on press (one report per reply) and whenever
-    // a new request goes out. Null when the scene has no response panel or no
-    // TMP font — everything else works without it.
+    // a new request goes out. Null (with an error logged) when
+    // ReportAnswerButton.CannotBuildReason says so — everything else works
+    // without it.
     private UnityEngine.UI.Button reportButton;
     private Coroutine reportArmRoutine;
 
@@ -109,16 +110,18 @@ public class AIResponseControllerV2 : MonoBehaviour
         if (safetyFilter == null)
             Debug.LogWarning("[AI] SafetyFilter not assigned — crisis routing is disabled.");
 
-        if (ResponseText != null)
+        // Spec 12 Part R: both buttons hang off ResponseText's parent and take
+        // its font. A failure is an error: no way back to the hub, no reports.
+        string cannotBuild = ReportAnswerButton.CannotBuildReason(ResponseText);
+        if (cannotBuild == null)
         {
-            reportButton = ReportAnswerButton.Build(ResponseText.transform.parent, OnReportAnswer);
-            if (reportButton == null)
-                Debug.LogWarning("[AI] Report button could not be built (no response panel RectTransform or TMP font).");
-
-            backButton = BackToHubButton.Build(ResponseText.transform.parent, OnBackToHub);
-            if (backButton == null)
-                Debug.LogWarning("[AI] Back to Hub button could not be built (no response panel RectTransform or TMP font).");
+            reportButton = ReportAnswerButton.Build(ResponseText, OnReportAnswer);
+            backButton = BackToHubButton.Build(ResponseText, OnBackToHub);
         }
+        if (reportButton == null)
+            Debug.LogError("[AI] Report button could not be built: " + (cannotBuild ?? "unknown"));
+        if (backButton == null)
+            Debug.LogError("[AI] Back to Hub button could not be built: " + (cannotBuild ?? "unknown"));
 
         Debug.Log($"--- CONNECTION STARTED: proxy session {sessionId} ---");
     }

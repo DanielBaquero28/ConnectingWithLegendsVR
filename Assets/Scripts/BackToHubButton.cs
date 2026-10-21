@@ -1,5 +1,5 @@
 using System;
-using UnityEngine;
+using TMPro;
 using UnityEngine.UI;
 
 // Spec 12 Part Q — the "Back to Hub" button in the conversation UI.
@@ -18,10 +18,11 @@ public static class BackToHubButton
 {
     private const string LABEL = "Back to Hub";
 
-    // Returns null (and builds nothing) when there is no RectTransform or no
-    // TMP default font. Always interactable until pressed.
-    public static Button Build(Transform anchor, Action onClick)
+    // Hung off the parent of `responseText`, like the Report button. Returns
+    // null and builds nothing when ReportAnswerButton.CannotBuildReason is
+    // non-null. Always interactable until pressed.
+    public static Button Build(TMP_Text responseText, Action onClick)
     {
-        return ReportAnswerButton.BuildPanelButton(anchor, "~BackToHub", LABEL, 0f, onClick);
+        return ReportAnswerButton.BuildPanelButton(responseText, "~BackToHub", LABEL, 0f, onClick);
     }
 }

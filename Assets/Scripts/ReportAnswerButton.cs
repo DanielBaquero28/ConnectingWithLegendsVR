@@ -6,13 +6,22 @@ using UnityEngine.UI;
 // Spec 12 Part M — the "Report this answer" button in the conversation UI.
 //
 // ----- Where it sits -----
-// Every character scene shows the reply in a "Response Panel" RectTransform
-// inside the world-space "Prompt Canvas v2" (the same canvas that carries the
-// Record / Submit buttons, so it already has the XR raycaster and ISDK ray
-// surface). The button is built in code and hung off the response panel's
-// bottom-right corner, just below it, so no scene needs Inspector wiring and
-// a new character scene gets it for free. The panel has no layout group, so
-// the extra child does not reflow anything.
+// Every character scene shows the reply in a response panel inside the
+// world-space "Prompt Canvas v2" (the same canvas that carries the Record /
+// Submit buttons, so it already has the XR raycaster and ISDK ray surface).
+// The button is built in code and hung off that panel's bottom-right corner,
+// just below it, so no scene needs Inspector wiring and a new character scene
+// gets it for free. The panel has no layout group, so the extra child does
+// not reflow anything.
+//
+// Spec 12 Part R: the panel and font both come from the controller's
+// serialized ResponseText, never from object names: the panel is its parent
+// RectTransform, the font is its font (else TMP_Settings.defaultFontAsset).
+// The font MUST be set explicitly. Prompt Canvas v2 is saved inactive in
+// every scene (the board button's On Click () reveals it), so a TMP label
+// added at Start has not run Awake, which is where TMP assigns its default
+// font. Before Part R the label's font read as null there and the build gave
+// up, so neither button was ever built on the Quest.
 //
 // ----- Behaviour (owned by AIResponseControllerV2) -----
 // Starts disabled. Enabled only after a character reply has finished
@@ -36,13 +45,12 @@ public static class ReportAnswerButton
     private static readonly Color LABEL_NORMAL = Color.white;
     private static readonly Color LABEL_DISABLED = new Color(0.62f, 0.62f, 0.64f, 0.45f);
 
-    // Builds the button as the last child of `anchor` (the response panel),
-    // hanging below its bottom-right corner. Returns null (and builds nothing)
-    // when there is no RectTransform or no TMP default font, so the caller can
-    // simply run without the button.
-    public static Button Build(Transform anchor, Action onClick)
+    // Builds the button as the last child of the response panel (the parent
+    // of `responseText`), hanging below its bottom-right corner. Returns null
+    // and builds nothing when CannotBuildReason is non-null.
+    public static Button Build(TMP_Text responseText, Action onClick)
     {
-        Button button = BuildPanelButton(anchor, "~ReportAnswer", LABEL, 1f, onClick);
+        Button button = BuildPanelButton(responseText, "~ReportAnswer", LABEL, 1f, onClick);
         if (button != null) SetInteractable(button, false);
         return button;
     }
@@ -56,14 +64,29 @@ public static class ReportAnswerButton
         if (label != null) label.color = interactable ? LABEL_NORMAL : LABEL_DISABLED;
     }
 
+    // Why the panel buttons cannot be built for this response text, or null
+    // when they can. Checked before anything is created.
+    public static string CannotBuildReason(TMP_Text responseText)
+    {
+        if (responseText == null) return "ResponseText is not assigned";
+        if (!(responseText.transform.parent is RectTransform)) return "ResponseText has no parent RectTransform";
+        if (LabelFont(responseText) == null) return "no TMP font (ResponseText has none and TMP_Settings has no default)";
+        return null;
+    }
+
+    private static TMP_FontAsset LabelFont(TMP_Text responseText)
+    {
+        return responseText.font != null ? responseText.font : TMP_Settings.defaultFontAsset;
+    }
+
     // Shared by the Report and Back to Hub buttons: a 150x30 button hung just
-    // below `anchor`'s bottom edge, at its left (cornerX 0) or right (cornerX 1)
-    // corner. Starts interactable.
-    internal static Button BuildPanelButton(Transform anchor, string name, string labelText,
+    // below the response panel's bottom edge, at its left (cornerX 0) or right
+    // (cornerX 1) corner. Starts interactable.
+    internal static Button BuildPanelButton(TMP_Text responseText, string name, string labelText,
         float cornerX, Action onClick)
     {
-        RectTransform parent = anchor as RectTransform;
-        if (parent == null) return null;
+        if (CannotBuildReason(responseText) != null) return null;
+        RectTransform parent = (RectTransform)responseText.transform.parent;
 
         GameObject go = new GameObject(name, typeof(RectTransform));
         RectTransform rect = (RectTransform)go.transform;
@@ -94,14 +117,12 @@ public static class ReportAnswerButton
         labelRect.anchorMin = Vector2.zero;
         labelRect.anchorMax = Vector2.one;
         labelRect.offsetMin = labelRect.offsetMax = Vector2.zero;
+        // Font first and explicitly: on the inactive canvas this label has not
+        // run Awake, so TMP has not given it a default font (see the header).
         TextMeshProUGUI label = labelGo.AddComponent<TextMeshProUGUI>();
-        if (label.font == null)
-        {
-            UnityEngine.Object.Destroy(go);
-            return null;
-        }
-        label.text = labelText;
+        label.font = LabelFont(responseText);
         label.fontSize = 14f;
+        label.text = labelText;
         label.fontStyle = FontStyles.Normal;
         label.color = LABEL_NORMAL;
         label.alignment = TextAlignmentOptions.Center;

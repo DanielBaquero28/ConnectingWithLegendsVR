@@ -14,6 +14,7 @@ const claude = require('./providers/claude');
 const googleTts = require('./providers/googleTts');
 const deepgram = require('./providers/deepgram');
 const safety = require('./safety');
+const personalDetails = require('./personalDetails');
 const metering = require('./metering');
 const events = require('./events');
 const alerts = require('./alerts');
@@ -294,6 +295,15 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
   // mid-sentence, so strip markdown first (it could hide a boundary).
   let replyText = sanitizeResponse(result.text);
   replyText = fitToSentences(replyText, character.maxWords);
+
+  // Spec 12 Part R: personal-detail guard. Remove anything the student said
+  // after "my name is", "I go to", etc. (this turn and earlier ones) before
+  // TTS and storage. The extracted details live only in this request: never
+  // stored, never logged. A reply left with no words ships the redirect line.
+  const studentTurns = session.turns.filter((t) => t.role === 'user').map((t) => t.text).concat(userText);
+  replyText = personalDetails.scrubReply(
+    replyText, personalDetails.extractDetails(studentTurns), [character.displayName, characterId]).text;
+  if (!/\p{L}/u.test(replyText)) replyText = safety.SAFETY_REDIRECT;
 
   // ===== TTS (spec 4.4 step 8) =====
   if (Date.now() >= deadlineAt) return timeout504(res, 'pre_tts', deadlineAt);
