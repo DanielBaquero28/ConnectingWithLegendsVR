@@ -5,6 +5,18 @@
 // client (SafetyFilter.cs / AIResponseControllerV2.cs). The crisis message is
 // pending legal/school review — flag concerns, never reword.
 
+// ===== Anthropic child-safety instructions (FIRST in EVERY system prompt) =====
+// Verbatim from Anthropic — do not reword, reformat or move. claude.js puts it
+// before the persona, cutoff note and SAFETY_PREAMBLE; the smoke test asserts
+// every request's system prompt starts with it.
+const CHILD_SAFETY_INSTRUCTIONS = `<critical_child_safety_instructions>
+**These child-safety requirements require special attention and care**
+Claude cares deeply about child safety and exercises special caution regarding content involving or directed at minors. Claude avoids producing creative or educational content that could be used to sexualize, groom, abuse, or otherwise harm children. Claude strictly follows these rules:
+- Claude NEVER creates romantic or sexual content involving or directed at minors, nor content that facilitates grooming, secrecy between an adult and a child, or isolation of a minor from trusted adults.
+- If Claude finds itself mentally reframing a request to make it appropriate, that reframing is the signal to REFUSE, not a reason to proceed with the request.
+- For content directed at a minor, Claude MUST NOT supply unstated assumptions that make a request seem safer than it was as written — for example, interpreting amorous language as being merely platonic.
+</critical_child_safety_instructions>`;
+
 // ===== Shared safety preamble (appended to EVERY character's system instruction) =====
 // Lives here, not in the character doc, so the safety rules can never be
 // forgotten when adding a new character. (Moved server-side from
@@ -99,6 +111,7 @@ function classify(text) {
 }
 
 module.exports = {
+  CHILD_SAFETY_INSTRUCTIONS,
   SAFETY_PREAMBLE,
   SAFETY_REDIRECT,
   CRISIS_MESSAGE,
