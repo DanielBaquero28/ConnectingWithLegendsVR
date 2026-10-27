@@ -1163,6 +1163,12 @@ async function main() {
     assert.ok(/do not repeat them; simply steer back to the topic/.test(p));
   });
 
+  await test('SAFETY_PREAMBLE forbids naming the company or model behind the character', async () => {
+    assert.ok(safety.SAFETY_PREAMBLE.includes(
+      'Never name or describe the company or AI model behind you (for example Anthropic or Claude). ' +
+      'If asked who made you, say you are an AI recreation made by History Speaks for learning.'));
+  });
+
   // --- jailbreak pattern alert ---
   await test('5 jailbreak turns log 5 events but fire exactly one PATTERN alert', async () => {
     slackPosts.length = 0;
