@@ -160,6 +160,7 @@ const claude = require('../src/providers/claude');
 const realFetch = global.fetch;
 const slackPosts = []; // { channel: 'safety'|'ops', text }
 let anthropicRequests = []; // { headers, body } as sent by the real claude.js
+const allSystemPrompts = []; // every request's system prompt, never reset
 let anthropicBehavior = () => claudeReply('Light is a wonderful puzzle.');
 
 global.fetch = async (url, opts) => {
@@ -171,6 +172,7 @@ global.fetch = async (url, opts) => {
   if (u === claude.ANTHROPIC_URL) {
     const body = JSON.parse(opts.body);
     anthropicRequests.push({ headers: opts.headers, body, signal: opts.signal });
+    allSystemPrompts.push(body.system);
     // Honour the abort signal like real fetch does, so deadline tests can hang.
     const signal = opts.signal;
     if (signal && signal.aborted) throw signal.reason || Object.assign(new Error('aborted'), { name: 'TimeoutError' });
@@ -510,7 +512,7 @@ async function main() {
     assert.deepEqual(body.messages, [
       { role: 'user', content: 'Q1' }, { role: 'assistant', content: 'A1' }, { role: 'user', content: 'Q2' + claude.TURN_SUFFIX },
     ]);
-    assert.equal(body.system, 'P\n\nC\n\n' + safety.SAFETY_PREAMBLE);
+    assert.equal(body.system, safety.CHILD_SAFETY_INSTRUCTIONS + '\n\nP\n\nC\n\n' + safety.SAFETY_PREAMBLE);
   });
 
   await test('long replies are cut at a sentence boundary (<= 60 words), never mid-sentence, and markdown-stripped', async () => {
@@ -1161,6 +1163,12 @@ async function main() {
     assert.ok(/do not repeat them; simply steer back to the topic/.test(p));
   });
 
+  await test('SAFETY_PREAMBLE forbids naming the company or model behind the character', async () => {
+    assert.ok(safety.SAFETY_PREAMBLE.includes(
+      'Never name or describe the company or AI model behind you (for example Anthropic or Claude). ' +
+      'If asked who made you, say you are an AI recreation made by History Speaks for learning.'));
+  });
+
   // --- jailbreak pattern alert ---
   await test('5 jailbreak turns log 5 events but fire exactly one PATTERN alert', async () => {
     slackPosts.length = 0;
@@ -1408,6 +1416,18 @@ async function main() {
       for (const k of ['text', 'transcript', 'reply', 'snippet', 'prompt']) {
         assert.equal(entry[k], undefined, `log line carries a ${k} key: ${line.slice(0, 120)}`);
       }
+    }
+  });
+
+  // --- Anthropic child-safety block: verbatim and first, on every request ---
+  await test('every request\'s system prompt starts with the child-safety block', async () => {
+    const block = safety.CHILD_SAFETY_INSTRUCTIONS;
+    assert.ok(block.startsWith('<critical_child_safety_instructions>\n**These child-safety requirements require special attention and care**\n'));
+    assert.ok(block.endsWith('interpreting amorous language as being merely platonic.\n</critical_child_safety_instructions>'));
+    assert.ok(allSystemPrompts.length > 20, `the stub saw ${allSystemPrompts.length} requests`);
+    for (const system of allSystemPrompts) {
+      assert.ok(system.startsWith(block + '\n\n'), `system prompt does not start with the block: ${system.slice(0, 80)}`);
+      assert.equal(system.indexOf(block), system.lastIndexOf(block), 'the block appears exactly once');
     }
   });
 

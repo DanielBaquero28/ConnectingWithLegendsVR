@@ -2,7 +2,8 @@
 // Replaces the Vertex/Gemini provider with the same exported interface, so
 // converse.js only changed where the result shape gained token counts.
 //
-// Request: system = persona + cutoff note + SAFETY_PREAMBLE (unchanged text),
+// Request: system = Anthropic child-safety block + persona + cutoff note +
+// SAFETY_PREAMBLE (unchanged text),
 // messages = few-shots as user/assistant pairs, the windowed live history,
 // then the current user turn. Alternation is enforced defensively (merge
 // same-role neighbours, drop a leading assistant turn) and the list always
@@ -20,7 +21,7 @@
 //
 // Logs carry status/attempt/request_id only — never prompt or reply text.
 
-const { SAFETY_PREAMBLE } = require('../safety');
+const { CHILD_SAFETY_INSTRUCTIONS, SAFETY_PREAMBLE } = require('../safety');
 const log = require('../log');
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
@@ -104,7 +105,9 @@ function normalizeMessages(raw) {
 }
 
 function buildRequestBody(character, historyTurns, userText) {
+  // Anthropic's child-safety block always comes first, before the persona.
   const system =
+    CHILD_SAFETY_INSTRUCTIONS + '\n\n' +
     character.systemPersona + '\n\n' + character.knowledgeCutoffNote + '\n\n' + SAFETY_PREAMBLE;
 
   const raw = [];

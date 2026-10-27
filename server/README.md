@@ -98,7 +98,7 @@ with `x-api-key: $ANTHROPIC_API_KEY` and `anthropic-version: 2023-06-01`.
 | `thinking` | `{ "type": <character's thinking> }` — `"disabled"` (default, the production decision from the Part B eval) or `"adaptive"` |
 | `output_config.effort` | the character's `effort` (default `low`; `low`/`medium`/`high`/`xhigh`/`max`). Still sent with thinking disabled — per the docs effort "works whether or not thinking is enabled". `xhigh`/`max` need `"adaptive"` (Haiku 5.5 returns 400 otherwise); the PUT rejects that combination. |
 | `inference_geo` | `CLAUDE_INFERENCE_GEO` env, default `us` (data residency; billed 1.1x) |
-| `system` | persona + knowledge-cutoff note + `SAFETY_PREAMBLE` |
+| `system` | Anthropic child-safety block (`CHILD_SAFETY_INSTRUCTIONS`, verbatim, always first) + persona + knowledge-cutoff note + `SAFETY_PREAMBLE` |
 | `messages` | few-shots as user/assistant pairs, windowed text-only history, current user turn **plus the length suffix** (spec 12 Part O: "(Reply in at most 40 words, in two or three sentences, ending with a short question when natural.)", appended in the request only — sessions store the student's text as sent) |
 
 No `temperature`/`top_p`/`top_k` are sent (Haiku 5.5 rejects non-defaults).

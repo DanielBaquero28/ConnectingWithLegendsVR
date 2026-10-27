@@ -81,3 +81,6 @@ windy-collector-google.json
 # Build and compile byproducts
 *_BurstDebugInformation_DoNotShip/
 compile.log
+
+# Voice recast audition samples (local only)
+voice-samples/
