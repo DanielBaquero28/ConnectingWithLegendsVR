@@ -394,6 +394,16 @@ function countWords(text) {
   return text.split(/\s+/).filter((w) => w.length > 0).length;
 }
 
+// A period after one of these never ends a sentence ("Dr. King", "Jr.,").
+const ABBREVIATIONS = new Set(['dr', 'mr', 'mrs', 'ms', 'jr', 'sr', 'st', 'prof', 'mt', 'vs', 'rev', 'hon']);
+
+// 2026-10-28: rewritten after it cut "Martin Luther King Jr." out of the
+// MIDDLE of MLK's replies ("I am Dr. , a minister"). The old version matched
+// sentences one by one and glued the matches back together, so "Dr." counted
+// as a sentence end and "Martin Luther King Jr.," (period followed by a
+// comma, not a space) matched nothing and silently vanished. Now the result is
+// always a PREFIX of the reply, cut at a real sentence end: nothing inside the
+// kept text can change.
 function fitToSentences(text, maxWords) {
   if (!text) return text;
   const limit = Number(maxWords) || 40;
@@ -401,23 +411,32 @@ function fitToSentences(text, maxWords) {
   if (countWords(trimmed) <= limit) return trimmed;
 
   const hardLimit = limit + SENTENCE_GRACE_WORDS;
-  // Sentence = text up to . ! or ? (plus any closing quotes/brackets) followed
-  // by whitespace or the end of the reply. A trailing fragment with no end
-  // mark is not a complete sentence and is never included.
-  const sentences = trimmed.match(/[^.!?]+(?:[.!?]+["'”’)\]]*)(?=\s|$)/g) || [];
+  // Sentence end = . ! or ? (plus any closing quotes/brackets) followed by
+  // whitespace or the end of the reply, unless the period closes an
+  // abbreviation or an initial. Keep the longest prefix that ends at one and
+  // fits the allowance; a trailing fragment with no end mark is never included.
+  const endRe = /[.!?]+["'”’)\]]*(?=\s|$)/g;
   let kept = '';
-  let keptWords = 0;
-  for (const s of sentences) {
-    const candidate = kept ? kept + ' ' + s.trim() : s.trim();
-    const n = countWords(candidate);
-    if (n > hardLimit) break;
+  let m;
+  while ((m = endRe.exec(trimmed)) !== null) {
+    if (m[0].startsWith('.') && endsAbbreviation(trimmed, m.index)) continue;
+    const candidate = trimmed.slice(0, m.index + m[0].length);
+    if (countWords(candidate) > hardLimit) break;
     kept = candidate;
-    keptWords = n;
   }
-  if (keptWords > 0) return kept;
+  if (kept) return kept;
 
   // No sentence boundary within the allowance: hard cut, no ellipsis.
   return trimmed.split(/\s+/).filter((w) => w.length > 0).slice(0, hardLimit).join(' ');
+}
+
+// True when the word just before the period at `dot` is an abbreviation or a
+// single-letter initial ("J. Edgar"); "I" is a word, not an initial.
+function endsAbbreviation(text, dot) {
+  const before = text.slice(0, dot).match(/(\S+)$/);
+  if (!before) return false;
+  const word = before[1].replace(/^[("'“‘]+/, '');
+  return ABBREVIATIONS.has(word.toLowerCase()) || /^[A-HJ-Z]$/.test(word);
 }
 
 // Strips markdown characters TTS would read aloud; normal punctuation stays.

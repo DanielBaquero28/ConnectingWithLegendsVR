@@ -561,6 +561,41 @@ async function main() {
     }
   });
 
+  // 2026-10-28: fitToSentences cut "Martin Luther King Jr." out of the middle
+  // of a 43-word reply. Captured from the real model on the live request.
+  await test('the sentence cut never removes text from the middle: "Dr. Martin Luther King Jr.," survives a 43-word reply', async () => {
+    const { fitToSentences } = require('../src/converse');
+    const w = (n, p) => Array.from({ length: n }, (_, i) => p + i).join(' ');
+    const RUN2 = 'I would rather not repeat your name, my friend, since it is yours to share, not mine to echo. ' +
+      'I am Dr. Martin Luther King Jr., a minister who believed in nonviolent change. What would you most like to learn about my struggle?';
+    assert.equal(fitToSentences(RUN2, 40), RUN2, 'over 40 but within the allowance: kept whole, name intact');
+
+    // End to end, as MLK: the shipped reply carries the full name, no "Dr. ,".
+    const psid = 'a1b2c3d4-0000-4000-8000-00000000fe01';
+    anthropicBehavior = () => claudeReply(RUN2);
+    try {
+      const res = await postJson('/converse', auth, { sessionId: psid, characterId: 'mlk', text: 'My name is Daniel, can you repeat it?' });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.ok(body.replyText.includes('I am Dr. Martin Luther King Jr., a minister'), body.replyText);
+      assert.ok(!/Dr\. ,|Dr\.,/.test(body.replyText), 'no blanked name');
+    } finally {
+      resetAnthropic();
+    }
+
+    // Abbreviations and initials are not sentence ends; real ends still cut.
+    const long = `I marched with Dr. King and Rev. Abernathy in Selma. ${w(40, 'x')}. ${w(30, 'y')}.`;
+    const cut = fitToSentences(long, 40);
+    assert.ok(long.startsWith(cut), 'the result is a prefix of the reply');
+    assert.ok(cut.endsWith('x39.'), 'cut at the first real sentence end within 60 words: ' + cut);
+    assert.equal(fitToSentences(`J. Edgar Hoover watched us. ${w(58, 'z')}.`, 40), 'J. Edgar Hoover watched us.',
+      'an initial is not a sentence end; the 60-word allowance forces the cut after the first real one');
+    assert.equal(fitToSentences(`So did I. ${w(58, 'q')}.`, 40), 'So did I.', '"I" at a sentence end is a word, not an initial');
+    for (const t of [RUN2, long, `${w(70, 'f')}`, `One. ${w(30, 'b')}! ${w(25, 'c')}? ${w(10, 'd')}.`]) {
+      assert.ok(t.startsWith(fitToSentences(t, 40)), 'prefix invariant: ' + t.slice(0, 30));
+    }
+  });
+
   // --- spec 12 Part R: personal-detail guard ---
   // Each test runs a fresh session and spies on the text sent to TTS.
   const personalDetails = require('../src/personalDetails');
