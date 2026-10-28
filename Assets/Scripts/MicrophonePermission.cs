@@ -9,6 +9,11 @@ using UnityEngine.Android;
 // the microphone always counts as available.
 public static class MicrophonePermission
 {
+    // Mic reliability (2026-10-28): raised when the student grants the
+    // permission in the dialog, so MicrophoneHealth can probe the mic right
+    // away (the hub asks; a conversation scene may be the one listening).
+    public static event System.Action Granted;
+
     public static bool IsGranted
     {
         get
@@ -29,7 +34,11 @@ public static class MicrophonePermission
         if (IsGranted) return;
 
         var callbacks = new PermissionCallbacks();
-        callbacks.PermissionGranted += _ => Debug.Log("[Mic] Microphone permission granted.");
+        callbacks.PermissionGranted += _ =>
+        {
+            Debug.Log("[Mic] Microphone permission granted.");
+            Granted?.Invoke();
+        };
         callbacks.PermissionDenied += _ => Debug.LogWarning("[Mic] Microphone permission denied; typing still works.");
         callbacks.PermissionDeniedAndDontAskAgain += _ =>
             Debug.LogWarning("[Mic] Microphone permission denied (don't ask again); typing still works.");

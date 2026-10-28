@@ -34,6 +34,20 @@ public class AudioRecorder : MonoBehaviour
 
     public System.Action OnRecordingFinished;
 
+    // Mic reliability (2026-10-28), read-only additions for MicrophoneHealth
+    // and the live level meter. Nothing below changes how recording behaves.
+    // Last ~100ms window measured by GetCurrentRMS (updated while recording).
+    public float LastRms { get; private set; }
+    public float LastPeak { get; private set; }
+    // Whole clip, measured in StopRecording from the samples it already copies.
+    public float LastClipPeak { get; private set; }
+    public float LastClipAverage { get; private set; }
+    public int LastClipSampleCount { get; private set; }
+    public string CurrentDevice => microphoneDevice;
+    // Read-only view of the (unchanged) silence threshold, so MicrophoneHealth
+    // can tell a quiet student (below it, non-zero) from a dead mic (zeros).
+    public float SilenceThreshold => silenceThreshold;
+
     public AudioClip RecordAudio()
     {
         microphoneDevice = Microphone.devices.Length > 0 ? Microphone.devices[0] : null;
@@ -126,12 +140,16 @@ public class AudioRecorder : MonoBehaviour
         recordedClip.GetData(samples, startSample);
 
         float sum = 0f;
+        float peak = 0f;
         for (int i = 0; i < samples.Length; i++)
         {
             sum += samples[i] * samples[i];
+            peak = Mathf.Max(peak, Mathf.Abs(samples[i])); // for the level meter / dead-mic check
         }
 
-        return Mathf.Sqrt(sum / samples.Length);
+        LastRms = Mathf.Sqrt(sum / samples.Length);
+        LastPeak = peak;
+        return LastRms;
     }
 
     public void StopRecording()
@@ -147,6 +165,7 @@ public class AudioRecorder : MonoBehaviour
             {
                 float[] samples = new float[position * recordedClip.channels];
                 recordedClip.GetData(samples, 0);
+                MeasureClip(samples);
 
                 AudioClip trimmedClip = AudioClip.Create(
                     "trimmed_recording",
@@ -164,6 +183,7 @@ public class AudioRecorder : MonoBehaviour
             }
             else
             {
+                MeasureClip(null);
                 Debug.LogWarning("[AudioRecorder] Microphone position was 0 — recording may be empty.");
             }
         }
@@ -171,6 +191,24 @@ public class AudioRecorder : MonoBehaviour
         {
             Debug.Log("[AudioRecorder] Microphone already stopped (hit maxDuration naturally).");
         }
+    }
+
+    // Whole-clip peak / mean absolute level over the samples StopRecording
+    // already copied. Exact zeros across the clip = a dead microphone (Link
+    // owns it), as opposed to a quiet student (small but non-zero).
+    private void MeasureClip(float[] samples)
+    {
+        float peak = 0f, sum = 0f;
+        int n = samples != null ? samples.Length : 0;
+        for (int i = 0; i < n; i++)
+        {
+            float a = Mathf.Abs(samples[i]);
+            sum += a;
+            if (a > peak) peak = a;
+        }
+        LastClipPeak = peak;
+        LastClipAverage = n > 0 ? sum / n : 0f;
+        LastClipSampleCount = n;
     }
 
     public string SaveWavFile(AudioClip audioClip, string filePath)

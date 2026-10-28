@@ -29,6 +29,13 @@ public class VoiceRecognitionController : MonoBehaviour
     private string recordLabelDefault;
     private const string MIC_OFF_TEXT = "Microphone is off — enable it in Settings > Privacy";
 
+    // Mic reliability (2026-10-28): dead-mic detection, recovery probe and the
+    // live level meter under Record. See MicrophoneHealth.
+    private MicrophoneHealth micHealth;
+    private RectTransform levelFill;
+    private GameObject levelBar;
+    private const float LEVEL_FULL_SCALE_PEAK = 0.1f; // a normal speaking peak fills the bar
+
     [Header("Microphone (Editor only)")]
     [Tooltip("Editor only: exact name from Microphone.devices. Empty, or not connected, " +
              "uses the default device. Ignored in device builds.")]
@@ -59,6 +66,9 @@ public class VoiceRecognitionController : MonoBehaviour
 #endif
 
         audioRecorder.OnRecordingFinished += OnRecordingAutoStop;
+        micHealth = gameObject.AddComponent<MicrophoneHealth>();
+        MicrophonePermission.Granted += OnMicPermissionGranted;
+        BuildLevelBar();
 
         // Record button -> StartRecording is wired here, off the RecordButton this
         // controller already owns. It used to live in a separate TestUIController
@@ -97,7 +107,83 @@ public class VoiceRecognitionController : MonoBehaviour
     private void OnApplicationFocus(bool hasFocus)
     {
         // Returning from the permission dialog or from Settings.
-        if (hasFocus && audioRecorder != null) RefreshMicAvailability();
+        if (hasFocus && audioRecorder != null)
+        {
+            RefreshMicAvailability();
+            ProbeMicIfIdle("focus"); // Link may have taken or released the mic meanwhile
+        }
+    }
+
+    private void OnApplicationPause(bool paused)
+    {
+        // Headset taken off and put back on: resume comes through here on Quest.
+        if (!paused && audioRecorder != null) ProbeMicIfIdle("resume");
+    }
+
+    private void OnMicPermissionGranted()
+    {
+        RefreshMicAvailability();
+        ProbeMicIfIdle("permission");
+    }
+
+    // 0.5 s microphone probe, only when nothing is recording or in flight. A
+    // dead probe shows the dead-mic message; a live one clears that message
+    // if it is the one on the panel.
+    private void ProbeMicIfIdle(string reason)
+    {
+        if (exiting || recording || processingInProgress || !micAvailable || micHealth == null) return;
+        micHealth.Probe(audioRecorder.CurrentDevice, reason, alive =>
+        {
+            if (!alive) ShowPanelMessage(MicrophoneHealth.DEAD_MESSAGE);
+            else if (PanelShows(MicrophoneHealth.DEAD_MESSAGE)) ShowPanelMessage("");
+        });
+    }
+
+    private void ShowPanelMessage(string text)
+    {
+        if (aiController != null && aiController.ResponseText != null) aiController.ResponseText.text = text;
+    }
+
+    private bool PanelShows(string text)
+    {
+        return aiController != null && aiController.ResponseText != null && aiController.ResponseText.text == text;
+    }
+
+    // Thin bar along the bottom of the Record button, filled from the live
+    // peak while recording, hidden otherwise. Built in code (plain values, no
+    // Inspector references) so every scene gets it.
+    private void BuildLevelBar()
+    {
+        if (RecordButton == null) return;
+        levelBar = new GameObject("LevelBar", typeof(RectTransform), typeof(Image));
+        var bar = (RectTransform)levelBar.transform;
+        bar.SetParent(RecordButton.transform, false);
+        bar.anchorMin = new Vector2(0.08f, 0f);
+        bar.anchorMax = new Vector2(0.92f, 0f);
+        bar.pivot = new Vector2(0.5f, 0f);
+        bar.anchoredPosition = new Vector2(0f, 3f);
+        bar.sizeDelta = new Vector2(0f, 4f);
+        var back = levelBar.GetComponent<Image>();
+        back.color = new Color(0f, 0f, 0f, 0.35f);
+        back.raycastTarget = false;
+
+        var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(Image));
+        levelFill = (RectTransform)fillGo.transform;
+        levelFill.SetParent(bar, false);
+        levelFill.anchorMin = Vector2.zero;
+        levelFill.anchorMax = new Vector2(0f, 1f);
+        levelFill.offsetMin = levelFill.offsetMax = Vector2.zero;
+        var fill = fillGo.GetComponent<Image>();
+        fill.color = new Color(0.35f, 0.85f, 0.45f, 1f);
+        fill.raycastTarget = false;
+        levelBar.SetActive(false);
+    }
+
+    private void SetLevel(float peak)
+    {
+        if (levelFill == null) return;
+        float level = Mathf.Clamp01(peak / LEVEL_FULL_SCALE_PEAK);
+        levelFill.anchorMax = new Vector2(level, 1f);
     }
 
     // Spec 12 Part P: denied -> Record shows the notice and stays disabled;
@@ -116,6 +202,7 @@ public class VoiceRecognitionController : MonoBehaviour
     {
         if (audioRecorder != null)
             audioRecorder.OnRecordingFinished -= OnRecordingAutoStop;
+        MicrophonePermission.Granted -= OnMicPermissionGranted;
 
         if (RecordButton != null)
             RecordButton.onClick.RemoveListener(StartRecording);
@@ -197,7 +284,9 @@ public class VoiceRecognitionController : MonoBehaviour
             SetButtonsInteractable(true);
             recording = false;
             HideProcessing();
+            return;
         }
+        if (levelBar != null) { SetLevel(0f); levelBar.SetActive(true); }
     }
 
     private void Update()
@@ -209,6 +298,7 @@ public class VoiceRecognitionController : MonoBehaviour
         remaining = Mathf.Max(0f, remaining);
 
         CountdownText.text = COUNTDOWN_PREFIX + Mathf.CeilToInt(remaining);
+        SetLevel(audioRecorder.LastPeak); // measured by the recorder's own silence check
     }
 
     private void OnRecordingAutoStop()
@@ -224,9 +314,27 @@ public class VoiceRecognitionController : MonoBehaviour
         processingInProgress = true;
 
         recording = false;
+        if (levelBar != null) levelBar.SetActive(false);
         ShowProcessing();
 
         audioRecorder.StopRecording();
+
+        // Dead microphone (exact zeros, e.g. Link owns it): never upload.
+        // Restart + probe once; tell the student what happened either way.
+        var outcome = MicrophoneHealth.Classify(audioRecorder.LastClipSampleCount,
+            audioRecorder.LastClipPeak, audioRecorder.SilenceThreshold);
+        micHealth.LogClip(audioRecorder, outcome);
+        if (outcome == MicrophoneHealth.ClipOutcome.Dead)
+        {
+            bool done = false, alive = false;
+            micHealth.Probe(audioRecorder.CurrentDevice, "recover", a => { alive = a; done = true; });
+            yield return new WaitUntil(() => done);
+            ShowPanelMessage(alive ? MicrophoneHealth.RECOVERED_MESSAGE : MicrophoneHealth.DEAD_MESSAGE);
+            processingInProgress = false;
+            HideProcessing();
+            SetButtonsInteractable(true);
+            yield break;
+        }
 
         string audioPath = audioRecorder.SaveWavFile(null, AudioPromptCleanup.FilePath);
         Debug.Log($"[Voice] Audio saved to: {audioPath}");
