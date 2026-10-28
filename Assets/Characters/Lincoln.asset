@@ -18,6 +18,6 @@ MonoBehaviour:
   portrait: {fileID: 0}
   cardTint: {r: 0.14901961, g: 0.20392157, b: 0.26666668, a: 1}
   sceneName: AbrahamLincolnScene
-  available: 1
+  available: 0
   networkErrorClip: {fileID: 8300000, guid: 587f1a8d17134e8eab3d67000ff429a3, type: 3}
   didntCatchClip: {fileID: 8300000, guid: 8cb78eaa60eb427b8baf74841b7a64e7, type: 3}
