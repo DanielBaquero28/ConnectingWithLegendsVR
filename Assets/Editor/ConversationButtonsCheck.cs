@@ -26,6 +26,12 @@ using UnityEngine.UI;
 // Record itself. Clearances allow for half the Back to Hub canvas width, so
 // they follow BackToHubButton.CANVAS_SCALE.
 //
+// 2026-10-28: every registry character with a scene is checked, locked ones
+// included (they stay in the build). The crisis message must fit the response
+// text at its full font size, with TMP auto-size on as the fallback, and the
+// response panel, Report, Record, Submit and the prompt field must not
+// overlap (see ResponsePanelFit, which made the panels fit).
+//
 // Menu: HistorySpeaks > Check Conversation Buttons.
 // Batch (Editor closed):
 //   Unity.exe -batchmode -quit -buildTarget Android -projectPath <repo>
@@ -74,7 +80,7 @@ public static class ConversationButtonsCheck
         // Copied out first: opening a scene unloads unused assets, after which
         // the registry's CharacterDefinition entries read as null.
         var targets = registry.characters
-            .Where(c => c != null && c.available)
+            .Where(c => c != null && !string.IsNullOrEmpty(c.sceneName))
             .Select(c => (id: c.characterId, sceneName: c.sceneName))
             .ToList();
 
@@ -97,10 +103,11 @@ public static class ConversationButtonsCheck
                 failures.Add($"{id} ({scenePath}): {failure}");
         }
 
-        if (checkedScenes == 0) failures.Add("the registry lists no available character scenes");
+        if (checkedScenes == 0) failures.Add("the registry lists no character scenes");
 
         if (failures.Count == 0)
-            Debug.Log($"[ButtonsCheck] PASSED: both buttons build in all {checkedScenes} character scenes.");
+            Debug.Log($"[ButtonsCheck] PASSED: both buttons build, the crisis message fits and nothing overlaps " +
+                      $"in all {checkedScenes} character scenes.");
         else
             foreach (string f in failures) Debug.LogError("[ButtonsCheck] FAIL - " + f);
         return failures;
@@ -118,7 +125,9 @@ public static class ConversationButtonsCheck
 
         TMP_Text responseText = controllers[0].ResponseText;
         string reason = ReportAnswerButton.CannotBuildReason(responseText)
-            ?? BackToHubButton.CannotBuildReason(responseText);
+            ?? BackToHubButton.CannotBuildReason(responseText)
+            ?? CheckResponseFit(responseText, scene.name)
+            ?? ResponsePanelFit.FindOverlap(controllers[0], responseText);
         if (reason != null) return reason;
         Debug.Log($"[ButtonsCheck]   {scene.name}: response panel active in hierarchy as saved = " +
                   responseText.transform.parent.gameObject.activeInHierarchy);
@@ -138,6 +147,20 @@ public static class ConversationButtonsCheck
             if (report != null) Object.DestroyImmediate(report.gameObject);
             if (back != null) Object.DestroyImmediate(back.GetComponentInParent<Canvas>(true).gameObject);
         }
+    }
+
+    // The crisis message fits at the full font size; auto-size covers longer text.
+    private static string CheckResponseFit(TMP_Text text, string sceneName)
+    {
+        if (!text.enableAutoSizing) return "response text auto-size is off";
+        if (text.fontSizeMin >= text.fontSizeMax) return "response text auto-size has no range";
+        if (text.fontSizeMin < Mathf.Floor(text.fontSizeMax * ResponsePanelFit.AUTO_SIZE_MIN_RATIO))
+            return $"response text auto-size minimum {text.fontSizeMin} is below {ResponsePanelFit.AUTO_SIZE_MIN_RATIO:P0} of {text.fontSizeMax}";
+        float overflow = ResponsePanelFit.CrisisOverflow(text, text.fontSizeMax);
+        if (overflow > 0f) return $"the crisis message overflows the response text by {overflow:F1} px at {text.fontSizeMax}";
+        Debug.Log($"[ButtonsCheck]   {sceneName}: crisis message fits at {text.fontSizeMax} with {-overflow:F1} px to spare, " +
+                  $"auto-size {text.fontSizeMin}-{text.fontSizeMax}, no overlaps");
+        return null;
     }
 
     private static string CheckButton(Button button, string what, bool interactable)

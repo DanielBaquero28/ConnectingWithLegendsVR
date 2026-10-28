@@ -469,7 +469,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   submitButton: {fileID: 584138326}
-  newQuestionButton: {fileID: 1134732641}
 --- !u!1 &52523519
 GameObject:
   m_ObjectHideFlags: 0
@@ -10992,8 +10991,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 153, y: -109.1}
-  m_SizeDelta: {x: 300, y: 180}
+  m_AnchoredPosition: {x: 153, y: -114.6}
+  m_SizeDelta: {x: 300, y: 191}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1588111516
 MonoBehaviour:
@@ -12357,6 +12356,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   OutputField: {fileID: 308060703}
   CountdownText: {fileID: 470162148}
+  preferredMicDeviceEditor: 
   RecordButton: {fileID: 21336326}
   SubmitButton: {fileID: 584138326}
   NewQuestionButton: {fileID: 1134732641}
@@ -12411,7 +12411,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 0, y: 1}
   m_AnchoredPosition: {x: 10, y: -10}
-  m_SizeDelta: {x: 282.1, y: 154.04}
+  m_SizeDelta: {x: 282.1, y: 165.04}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &1918205242
 MonoBehaviour:
@@ -12463,9 +12463,9 @@ MonoBehaviour:
   m_fontSize: 14
   m_fontSizeBase: 14
   m_fontWeight: 400
-  m_enableAutoSizing: 0
-  m_fontSizeMin: 18
-  m_fontSizeMax: 72
+  m_enableAutoSizing: 1
+  m_fontSizeMin: 10
+  m_fontSizeMax: 14
   m_fontStyle: 1
   m_HorizontalAlignment: 1
   m_VerticalAlignment: 256
