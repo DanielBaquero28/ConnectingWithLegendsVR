@@ -119,9 +119,10 @@ function tidy(text) {
 }
 
 // Removes the student's details from `reply`. Words of the character's own
-// name are never removed ("I go to Lincoln High" must not turn Abraham
-// Lincoln into Abraham), and generic words only go as part of a whole phrase.
-// Returns { text, removed } where removed counts the cuts made.
+// name (displayName, characterId and the seed's nameAliases) are never
+// removed, not even inside a matched phrase ("I go to Lincoln High" must not
+// turn Abraham Lincoln into Abraham), and generic words only go as part of a
+// whole phrase. Returns { text, removed } where removed counts the cuts made.
 function scrubReply(reply, details, protectedNames) {
   if (!reply || !details || details.length === 0) return { text: reply, removed: 0 };
 
@@ -131,13 +132,14 @@ function scrubReply(reply, details, protectedNames) {
   }
   const removable = (w) => !GENERIC_WORDS.has(normalize(w)) && !protectedWords.has(normalize(w));
 
-  // Whole phrases first (longest first), then single words. A phrase goes
-  // whole even when its only specific word is the character's own name
-  // ("Lincoln High" in Lincoln's reply); an all-generic one ("small town") never.
+  // Whole phrases first (longest first), then single words. A phrase holding
+  // a name word is never removed whole: its other specific words still go one
+  // by one below. An all-generic phrase ("small town") never goes either.
   const phrases = new Map();
   const singles = new Map();
   for (const words of details) {
-    if (words.length > 1 && words.some((w) => !GENERIC_WORDS.has(normalize(w)))) {
+    if (words.length > 1 && words.some((w) => !GENERIC_WORDS.has(normalize(w))) &&
+        !words.some((w) => protectedWords.has(normalize(w)))) {
       phrases.set(words.map(normalize).join(' '), words);
     }
     for (const w of words) if (removable(w)) singles.set(normalize(w), [w]);

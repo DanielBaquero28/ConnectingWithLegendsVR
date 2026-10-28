@@ -52,9 +52,11 @@ const MAX_TOKENS = 600; // thinking tokens count against this too
 // so history turns resent on later requests do not carry it.
 // Spec 12 Part Q: the no-repeat rule for personal details rides along too
 // (the SAFETY_PREAMBLE rule from Part K stays as well).
+// 2026-10-28: "the student mentions" -> "shares about themselves". The old
+// wording made the model drop its OWN name ("I am Dr. , a minister…").
 const TURN_SUFFIX =
   ' (Reply in at most 40 words, in two or three sentences, ending with a short question when natural.' +
-  ' Never repeat names, schools or other personal details the student mentions.)';
+  ' Never repeat names, schools or other personal details the student shares about themselves.)';
 
 const MAX_ATTEMPTS = 3;
 const ATTEMPT_TIMEOUT_MS = 15000;

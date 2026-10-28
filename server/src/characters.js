@@ -43,6 +43,11 @@ async function getCharacter(characterId) {
     thinking: raw.thinking || 'disabled',
     maxWords: raw.maxWords || 40,
     maxTurns: raw.maxTurns || 8,
+    // Words of the character's own name the personal-detail guard must never
+    // remove ("Dr", "King", "MLK"...). Missing in older docs = [].
+    nameAliases: Array.isArray(raw.nameAliases)
+      ? raw.nameAliases.filter((w) => typeof w === 'string' && w.trim())
+      : [],
   };
 
   cache.set(characterId, { data, fetchedAt: Date.now() });

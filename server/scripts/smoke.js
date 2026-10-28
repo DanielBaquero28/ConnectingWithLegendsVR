@@ -449,8 +449,11 @@ async function main() {
     assert.ok(/at most 40 words/.test(claude.TURN_SUFFIX));
     // Spec 12 Part Q: the personal-details rule rides on the current turn,
     // and the Part K preamble rule is still there.
-    assert.ok(claude.TURN_SUFFIX.includes('Never repeat names, schools or other personal details the student mentions.'),
-      'the turn suffix carries the personal-details rule');
+    assert.ok(claude.TURN_SUFFIX.includes(
+      'Never repeat names, schools or other personal details the student shares about themselves.'),
+    'the turn suffix carries the personal-details rule');
+    assert.ok(!claude.TURN_SUFFIX.includes('the student mentions'),
+      'the old wording (which made characters drop their own name) is gone');
     assert.ok(body.system.includes('If a student volunteers such details, do not repeat them'),
       'the SAFETY_PREAMBLE personal-information rule is kept');
     for (let i = 1; i < body.messages.length; i++) {
@@ -561,12 +564,12 @@ async function main() {
   // --- spec 12 Part R: personal-detail guard ---
   // Each test runs a fresh session and spies on the text sent to TTS.
   const personalDetails = require('../src/personalDetails');
-  async function converseCapturingTts(sessionId, text) {
+  async function converseCapturingTts(sessionId, text, characterId) {
     const ttsTexts = [];
     const mocked = googleTts.synthesize;
     googleTts.synthesize = async (t, ...rest) => { ttsTexts.push(t); return mocked(t, ...rest); };
     try {
-      const res = await postJson('/converse', auth, { sessionId, text });
+      const res = await postJson('/converse', auth, { sessionId, text, characterId });
       assert.equal(res.status, 200);
       return { body: await res.json(), ttsTexts };
     } finally {
@@ -620,13 +623,79 @@ async function main() {
     } finally {
       resetAnthropic();
     }
-    // The character's own name is protected even when the student shares it.
+    // The character's own name is protected even when the student shares it,
+    // including inside a matched phrase: "Lincoln High" is not removed whole
+    // and "High" alone is generic, so nothing is cut.
     const lincoln = personalDetails.scrubReply('I am Abraham Lincoln. What do you study at Lincoln High?',
       personalDetails.extractDetails(['my school is lincoln high']), ['Abraham Lincoln', 'lincoln']);
-    assert.equal(lincoln.text, 'I am Abraham Lincoln. What do you study?');
+    assert.equal(lincoln.text, 'I am Abraham Lincoln. What do you study at Lincoln High?');
+    // ...while the other specific words of such a phrase still go one by one.
+    const mlkSchool = personalDetails.scrubReply('I am Dr. Martin Luther King Jr. How is King Westbrook?',
+      personalDetails.extractDetails(['I go to King Westbrook']), ['Martin Luther King Jr.', 'mlk', 'Dr', 'MLK']);
+    assert.equal(mlkSchool.text, 'I am Dr. Martin Luther King Jr. How is King?');
     for (const q of ['What was the name of your school?', 'Where did you live in 1905?',
       'Who called you a genius?', 'Why did Caesar go to Gaul?', 'Is my name in history books?']) {
       assert.deepEqual(personalDetails.extractDetails([q]), [], `no detail in "${q}"`);
+    }
+  });
+
+  // --- 2026-10-28: a character's own name is never removed (MLK said "I am Dr. , a minister") ---
+  // The model is stubbed, so these prove the SERVER keeps the name; whether
+  // the model says it is checked live against the namefix revision.
+  const characters = require('../src/characters');
+  const nameSeeds = fs.readdirSync(__dirname)
+    .filter((f) => f.startsWith('seed-') && f.endsWith('.json'))
+    .map((f) => ({ id: f.slice('seed-'.length, -'.json'.length), seed: JSON.parse(fs.readFileSync(path.join(__dirname, f), 'utf8')) }));
+  const withStop = (name) => (name.endsWith('.') ? name : name + '.');
+
+  await test('all ten seeds carry a non-empty nameAliases list that reaches the character doc', async () => {
+    assert.equal(nameSeeds.length, 10);
+    for (const { id, seed } of nameSeeds) {
+      assert.ok(Array.isArray(seed.nameAliases) && seed.nameAliases.length > 0, `${id} nameAliases`);
+      characters.invalidate(id);
+      const doc = await characters.getCharacter(id);
+      assert.deepEqual(doc.nameAliases, seed.nameAliases, `${id} nameAliases served`);
+    }
+  });
+
+  let nameSid = 0x100;
+  const nextNameSid = () => `a1b2c3d4-0000-4000-8000-${(nameSid++).toString(16).padStart(12, '0')}`;
+  for (const { id, seed } of nameSeeds) {
+    const full = seed.displayName;
+    await test(`${id}: "Who are you?" and "Are you ${full}?" keep the full name; "My name is Daniel" still removes Daniel`, async () => {
+      const psid = nextNameSid();
+      try {
+        anthropicBehavior = () => claudeReply(`I am ${withStop(full)} What would you like to know?`);
+        let { body, ttsTexts } = await converseCapturingTts(psid, 'Who are you?', id);
+        assert.equal(body.replyText, `I am ${withStop(full)} What would you like to know?`, 'who are you');
+        assert.deepEqual(ttsTexts, [body.replyText]);
+
+        anthropicBehavior = () => claudeReply(`Yes, I am ${withStop(full)}`);
+        ({ body } = await converseCapturingTts(psid, `Are you ${full}?`, id));
+        assert.equal(body.replyText, `Yes, I am ${withStop(full)}`, 'are you [name]');
+
+        anthropicBehavior = () => claudeReply(`Hello, Daniel! I am ${withStop(full)}`);
+        ({ body, ttsTexts } = await converseCapturingTts(psid, 'My name is Daniel, can you repeat it?', id));
+        assert.equal(body.replyText, `Hello! I am ${withStop(full)}`, 'Daniel removed, own name kept');
+        assert.deepEqual(ttsTexts, [body.replyText]);
+        assert.ok(!lastModelTurn(psid).includes('Daniel'), 'Daniel not stored');
+      } finally {
+        resetAnthropic();
+      }
+    });
+  }
+
+  await test('every alias survives even when the student uses it as their own name or inside a school name', async () => {
+    for (const { id } of nameSeeds) {
+      const doc = await characters.getCharacter(id);
+      const protectedNames = [doc.displayName, id, ...doc.nameAliases];
+      for (const alias of doc.nameAliases) {
+        const reply = `They call me ${alias}. Tell me more.`;
+        for (const said of [`My name is ${alias}`, `I go to ${alias} Academy`]) {
+          const out = personalDetails.scrubReply(reply, personalDetails.extractDetails([said]), protectedNames);
+          assert.equal(out.text, reply, `${id}: "${alias}" kept after "${said}"`);
+        }
+      }
     }
   });
 
@@ -1121,7 +1190,10 @@ async function main() {
     assert.ok(/then continue in character/.test(p));
     assert.ok(/Answer in two or three short sentences, never more than 40 words/.test(p), 'spec 12 Part N length rule');
     assert.ok(/nothing that happened after your death or your knowledge cutoff/.test(p), 'spec 12 Part N era rule');
-    assert.ok(/never refer to yourself by name in the third person/.test(p), 'spec 12 Part O first-person rule');
+    assert.ok(p.includes('Always speak in the first person (‘I’, not your own name in the third person). ' +
+      'You may and should say your full name when introducing yourself or when asked who you are.'),
+    'first-person rule, reworded 2026-10-28 so characters say their own name');
+    assert.ok(!/never refer to yourself by name/.test(p), 'the old name-avoiding wording is gone');
     assert.ok(/if a famous story is disputed or a myth, say so or do not tell it/.test(p), 'spec 12 Part O myth rule');
     assert.ok(/honors, memorials, films, currency, or anything named after you/.test(p));
     anthropicRequests = [];

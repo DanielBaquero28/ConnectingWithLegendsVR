@@ -302,7 +302,8 @@ async function runPipeline(req, res, { sessionId, characterId, userText, transcr
   // stored, never logged. A reply left with no words ships the redirect line.
   const studentTurns = session.turns.filter((t) => t.role === 'user').map((t) => t.text).concat(userText);
   replyText = personalDetails.scrubReply(
-    replyText, personalDetails.extractDetails(studentTurns), [character.displayName, characterId]).text;
+    replyText, personalDetails.extractDetails(studentTurns),
+    [character.displayName, characterId, ...character.nameAliases]).text;
   if (!/\p{L}/u.test(replyText)) replyText = safety.SAFETY_REDIRECT;
 
   // ===== TTS (spec 4.4 step 8) =====
