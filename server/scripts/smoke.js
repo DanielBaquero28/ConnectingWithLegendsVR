@@ -578,8 +578,11 @@ async function main() {
   }
   const lastModelTurn = (sessionId) =>
     fakeDb.docs.get(`sessions/${sessionId}`).turns.filter((t) => t.role === 'model').pop().text;
+  // Character docs are seed content (MLK's and Einstein's few-shots say
+  // "My name is Daniel"), not anything the student wrote, so they are skipped.
   const docsOutsideSessions = () =>
-    JSON.stringify([...fakeDb.docs.entries()].filter(([k]) => !k.startsWith('sessions/')));
+    JSON.stringify([...fakeDb.docs.entries()]
+      .filter(([k]) => !k.startsWith('sessions/') && !k.startsWith('characters/')));
 
   await test('a name the student gives is removed from the reply before TTS and storage, and stored nowhere new', async () => {
     const psid = 'a1b2c3d4-0000-4000-8000-0000000000e1';
