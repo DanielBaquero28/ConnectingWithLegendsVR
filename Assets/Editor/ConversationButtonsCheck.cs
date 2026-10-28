@@ -31,6 +31,10 @@ using UnityEngine.UI;
 // text at its full font size, with TMP auto-size on as the fallback, and the
 // response panel, Report, Record, Submit and the prompt field must not
 // overlap (see ResponsePanelFit, which made the panels fit).
+// Also 2026-10-28: the question field's caret is 3 px, blinking, custom
+// coloured, with PromptCaret attached and no select-all on focus; and in the
+// side-by-side layout (MLKScene) the response panel's top edge matches the
+// field's top edge (see PromptFieldSetup).
 //
 // Menu: HistorySpeaks > Check Conversation Buttons.
 // Batch (Editor closed):
@@ -127,7 +131,8 @@ public static class ConversationButtonsCheck
         string reason = ReportAnswerButton.CannotBuildReason(responseText)
             ?? BackToHubButton.CannotBuildReason(responseText)
             ?? CheckResponseFit(responseText, scene.name)
-            ?? ResponsePanelFit.FindOverlap(controllers[0], responseText);
+            ?? ResponsePanelFit.FindOverlap(controllers[0], responseText)
+            ?? CheckPromptField(controllers[0], scene.name);
         if (reason != null) return reason;
         Debug.Log($"[ButtonsCheck]   {scene.name}: response panel active in hierarchy as saved = " +
                   responseText.transform.parent.gameObject.activeInHierarchy);
@@ -160,6 +165,31 @@ public static class ConversationButtonsCheck
         if (overflow > 0f) return $"the crisis message overflows the response text by {overflow:F1} px at {text.fontSizeMax}";
         Debug.Log($"[ButtonsCheck]   {sceneName}: crisis message fits at {text.fontSizeMax} with {-overflow:F1} px to spare, " +
                   $"auto-size {text.fontSizeMin}-{text.fontSizeMax}, no overlaps");
+        return null;
+    }
+
+    // Caret settings and (side by side only) the top-edge alignment.
+    private static string CheckPromptField(AIResponseControllerV2 controller, string sceneName)
+    {
+        TMP_InputField field = controller.PromptField;
+        if (field == null) return "AIResponseControllerV2.PromptField is not set";
+        if (field.caretWidth != (int)PromptFieldSetup.CARET_WIDTH) return $"caret width is {field.caretWidth}, expected {PromptFieldSetup.CARET_WIDTH}";
+        if (field.caretBlinkRate <= 0f) return "caret does not blink";
+        if (!field.customCaretColor || field.caretColor.a < 0.99f) return "caret colour is not a custom opaque colour";
+        if (field.caretColor != PromptFieldSetup.CaretColorFor(field)) return "caret colour does not contrast with the field background";
+        if (field.onFocusSelectAll) return "field selects all text on focus";
+        if (field.GetComponent<PromptCaret>() == null) return "field has no PromptCaret";
+
+        string note = "";
+        if (sceneName == PromptFieldSetup.SIDE_BY_SIDE_SCENE)
+        {
+            var panel = (RectTransform)controller.ResponseText.transform.parent;
+            float delta = PromptFieldSetup.TopEdge((RectTransform)field.transform, panel.parent)
+                          - PromptFieldSetup.TopEdge(panel, panel.parent);
+            if (Mathf.Abs(delta) > 0.01f) return $"response panel top is {delta:F2} px off the field top";
+            note = ", panel top aligned with the field top";
+        }
+        Debug.Log($"[ButtonsCheck]   {sceneName}: caret {field.caretWidth}px, blinking, custom colour, PromptCaret on{note}");
         return null;
     }
 
